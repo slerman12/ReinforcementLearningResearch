@@ -2,8 +2,9 @@ from __future__ import division
 import numpy as np
 import cv2
 import gym
+import time
 from sklearn import random_projection
-from sklearn.neighbors import KNeighborsRegressor
+from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
 from skimage.segmentation import slic, felzenszwalb
 from skimage.segmentation import mark_boundaries
@@ -122,7 +123,7 @@ class Memory:
         if unique_size < self.length:
             M = self.memory[unique]
 
-            # Can make this way more efficient by only iterating duplicates
+            # Need to make this way more efficient by only iterating duplicates
             for mem in self.memory:
                 dup = np.argwhere(np.equal(M[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
                 if M[dup, REWARD_INDEX] < mem[REWARD_INDEX]:
@@ -291,7 +292,7 @@ class Agent:
 
     def Finish(self):
         self.local_memory.Advantage()
-        self.local_memory.Unique()
+        # self.local_memory.Unique()
         self.global_memory.Merge(self.local_memory, self.k, self.actions)
         self.local_memory.Reset()
         # self.model.Finish()
@@ -389,29 +390,114 @@ class SLIC:
 
 # Felsenszwalb’s efficient graph based image segmentation
 class Felsenszwalb:
-    state = None
-    segments = None
+    class Object:
+        index = None
+        area = None
+        x = None
+        y = None
+        trajectory_x = None
+        trajectory_y = None
+        previous = None
 
-    def __init__(self, object_capacity, property_capacity):
+    class Model:
+        objects = []
+        length = 0
+        array = None
+        previous = None
+
+        def add(self, o):
+            self.objects.append(o)
+            assert self.objects == sorted(self.objects, key=lambda x: x.index)
+            self.length += 1
+
+            if self.array is None:
+                self.array = np.ndarray((1, 3), buffer=np.array([o.area, o.x, o.y]))
+            else:
+                self.array = np.append(self.array, np.array([[o.area, o.x, o.y]]), axis=0)
+
+        def forget(self):
+            self.previous = None
+            for o in self.objects:
+                o.previous = None
+
+        def finish(self):
+            self.forget()
+            self.previous = self
+            self.objects = []
+            self.length = 0
+            self.array = None
+
+        def scene(self, object_capacity, property_capacity):
+            scene = np.zeros((object_capacity, property_capacity))
+
+            for index in range(min(object_capacity, self.length)):
+                scene[index, 0] = self.objects[index].area
+                scene[index, 1] = self.objects[index].x
+                scene[index, 2] = self.objects[index].y
+
+            return scene.flatten()
+
+        def prev_model(self):
+            likely_pairs = NearestNeighbors(n_neighbors=1)
+            likely_pairs.fit(self.previous.array[:, :3])
+
+            graph = likely_pairs.kneighbors_graph(self.array[:, :3], mode="distance").toarray()
+
+            for index in range(max(self.length, self.previous.length)):
+
+                x, y = np.unravel_index(np.argmin(graph, axis=None), graph.shape)
+
+                self.objects[index].previous = self.previous.objects[y]
+
+                graph[x, :] = np.inf
+                graph[:, y] = np.inf
+
+                if np.isinf(graph).all():
+                    break
+
+                    # objects_gone = np.setdiff1d(np.arange(self.previous.array.shape[0]), self.pair_indices[:, 1])
+                    # new_objects = np.setdiff1d(np.arange(self.array.shape[0]), self.pair_indices[:, 0])
+
+    # Group relations based on importance points given for action/reward correlations with trajectory changes,
+    # and physical proximity
+
+    def __init__(self, object_capacity):
         self.object_capacity = object_capacity
-        self.property_capacity = property_capacity
+        self.property_capacity = 3
+        self.state = None
+        self.segments = None
+
         if self.object_capacity is not None and self.property_capacity is not None:
             self.state_space = self.object_capacity * self.property_capacity
 
+        self.model = self.Model()
+
     def Update(self, state, scale=3.0, sigma=0.1, min_size=1):
+        self.state = state
+
         # Segmentation
         self.segments = felzenszwalb(state, scale=scale, sigma=sigma, min_size=min_size)
 
         props = regionprops(self.segments)
 
-        num_objects = len(props)
+        for obj in range(len(props)):
+            o = self.Object()
 
-        scene = np.zeros(self.object_capacity * 3)
+            o.index = obj
+            o.area = props[obj].area
+            o.x = props[obj].centroid[0]
+            o.y = props[obj].centroid[1]
 
-        for obj in range(min(self.object_capacity, num_objects)):
-            scene[obj * 3] = props[obj].area
-            scene[obj * 3 + 1] = props[obj].centroid[0]
-            scene[obj * 3 + 2] = props[obj].centroid[1]
+            self.model.add(o)
+
+        if self.model.previous is None:
+            self.model.previous = self.model
+
+        self.model.prev_model()
+
+        scene = self.model.scene(self.object_capacity, self.property_capacity)
+
+        self.model.finish()
 
         return scene
 
@@ -436,22 +522,20 @@ if __name__ == "__main__":
     ADVANTAGE_INDEX = -1
 
     # Environment
-    env = gym.make('CartPole-v0')
-    action_space = np.arange(env.action_space.n)
-    objects = None
-    properties = None
-    state_space = env.observation_space.shape[0]
+    # env = gym.make('CartPole-v0')
+    # action_space = np.arange(env.action_space.n)
+    # objects = None
+    # properties = None
+    # state_space = env.observation_space.shape[0]
 
     # # Environment
-    # env = gym.make('Breakout-v0')
-    # action_space = np.arange(env.action_space.n)
-    # objects = 25
-    # properties = 3
-    # state_space = env.observation_space.shape[0] * env.observation_space.shape[1]
+    env = gym.make('Breakout-v0')
+    action_space = np.arange(env.action_space.n)
+    objects = 25
 
     # Visual model
-    occipital = Felsenszwalb(objects, properties)
-    occipital.state_space = state_space
+    occipital = Felsenszwalb(objects)
+    # occipital.state_space = state_space
 
     # Global memory
     memory_limit = 1000000
@@ -460,8 +544,9 @@ if __name__ == "__main__":
     # Agent
     agent = Agent(occipital, hippocampus, action_space, 1000, 1000, reward_discount=1, k=11)
 
-    epoch = 100
+    epoch = 1
     epoch_rewards = []
+    times = []
 
     for run_through in range(100000):
         # Initialize environment
@@ -474,21 +559,37 @@ if __name__ == "__main__":
             # if run_through > 200:
             #     env.render()
 
+            # start = time.time()
+
             # Get scene from model
-            # sc = agent.Model(s)
-            sc = np.array([round(elem, 1) for elem in s])
+            sc = agent.Model(s)
+            # sc = np.array([round(elem, 1) for elem in s])
             # sc = s
 
+            # end = time.time()
+            # times.append(end - start)
+            # print("Model time: {}".format(end - start))
+
+            # start = time.time()
+
             # Get action and expected reward
-            a, e = agent.Act(sc, min(run_through * 10, 100))
+            a, e = agent.Act(sc, min(run_through * 20, 100))
+
+            # end = time.time()
+            # print("Action time: {}".format(end - start))
 
             # Execute action
             s, r, done, info = env.step(a)
 
             rewards.append(r)
 
+            # start = time.time()
+
             # Learn from the reward
             agent.Learn(sc, a, r, e)
+
+            # end = time.time()
+            # print("Learning time: {}".format(end - start))
 
             # Break at end of run-through
             if done:
@@ -500,7 +601,9 @@ if __name__ == "__main__":
         if not run_through % epoch:
             print("Last {} run-through reward average: {}".format(epoch, np.mean(epoch_rewards)))
             print("* {} memories stored".format(agent.global_memory.length))
+            # print("* Average modeling time: {}".format(np.mean(times)))
             epoch_rewards = []
+            times = []
 
         # Dump run-through's memories into global memory
         agent.Finish()
