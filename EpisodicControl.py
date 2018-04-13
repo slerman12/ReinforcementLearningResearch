@@ -77,6 +77,7 @@ import matplotlib.pyplot as plt
 class Memory:
     length = 0
     knn = {}
+    remove = np.array([])
 
     def __init__(self, memory_size, memory_horizon, reward_horizon=1):
         self.memory_size = memory_size
@@ -105,13 +106,51 @@ class Memory:
             # self.memory[i, -1] += reward * (np.math.exp(-i))
             self.memory[i, REWARD_INDEX] += reward * (reward_discount ** i)
 
-    def Advantage(self):
-        self.memory[:, ADVANTAGE_INDEX] = np.absolute(self.memory[:, REWARD_INDEX] - self.memory[:, EXPECTED_INDEX])
+    def Advantage(self, advantage_cutoff=None):
+        self.memory[:, ADVANTAGE_INDEX] = self.memory[:, REWARD_INDEX] - self.memory[:, EXPECTED_INDEX]
+        if advantage_cutoff is not None:
+            self.memory = self.memory[np.abs(self.memory[:, ADVANTAGE_INDEX]) > advantage_cutoff]
+            self.length = self.memory.shape[0]
+
+    def Queue_For_Removal(self, index):
+        if index not in self.remove:
+            self.remove = np.append(self.remove, index)
+
+    def Unique(self):
+        _, unique = np.unique(self.memory[:, :ACTION_INDEX + 1], axis=0, return_index=True)
+        unique_size = unique.size
+        if unique_size < self.length:
+            M = self.memory[unique]
+
+            # Can make this way more efficient by only iterating duplicates
+            for mem in self.memory:
+                dup = np.argwhere(np.equal(M[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+                if M[dup, REWARD_INDEX] < mem[REWARD_INDEX]:
+                    M[dup, REWARD_INDEX] = mem[REWARD_INDEX]
+
+            self.memory = M
+            self.length = unique.size
+
+    def Reset(self):
+        self.memory = np.zeros((1, self.memory_size))
+        self.length = 1
+        self.remove = np.array([])
 
     # Merge and clear
     def Merge(self, m, k, actions):
-        duplicates = []
         # If duplicate, use max reward
+        # for i in m.remove:
+        #     i = int(i)
+        #     print("BLA")
+        #     print(i)
+        #     print(np.argwhere(np.equal(m.memory[:, :ACTION_INDEX + 1], self.memory[i, :ACTION_INDEX + 1]).all(1)))
+        #
+        #     duplicate = np.argwhere(np.equal(m.memory[:, :ACTION_INDEX + 1], self.memory[i, :ACTION_INDEX + 1]).all(1))[0]
+        #
+        #     if self.memory[i, REWARD_INDEX] > m.memory[duplicate, REWARD_INDEX]:
+        #         m.memory[duplicate, REWARD_INDEX] = self.memory[i, REWARD_INDEX]
+        duplicates = []
+
         for mem in m.memory:
             try:
                 duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
@@ -137,7 +176,7 @@ class Memory:
 
         # Delete memories beyond horizon
         if self.length > self.memory_horizon:
-            self.memory = self.memory[:-(self.length - self.memory_horizon)]
+            self.memory = self.memory[:-(self.length - self.memory_horizon), :]
             self.length = self.memory_horizon
 
         # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
@@ -149,6 +188,9 @@ class Memory:
                     dist[i] = 1.
             return dist
 
+        # def advantage_distance(x, y):
+        #     return np.linalg.norm(x[:-NUM_ATTRIBUTES] - y[:-NUM_ATTRIBUTES])
+
         for action in actions:
             # self.knn[action] = NearestNeighbors(n_neighbors=k)
             # self.knn[action].fit(self.memory[self.memory[:, -2] == action, :-2])
@@ -156,10 +198,9 @@ class Memory:
             subspace_size = subspace.shape[0]
             if subspace_size == 0:
                 subspace = np.zeros((1, self.memory_size))
+                subspace_size = 1
             self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights)
-            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, [REWARD_INDEX, ADVANTAGE_INDEX]])
-
-        return np.zeros((1, self.memory_size))
+            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, REWARD_INDEX])
 
 
 class Agent:
@@ -180,20 +221,51 @@ class Agent:
     def Act(self, scene, decisiveness):
         # Initialize probabilities
         expected = []
-        advantage = []
+        # advantage = []
+
+        # # Duplicate
+        # prev_actions = []
+        # indices = []
 
         # Get expected reward for each action
         for action in self.actions:
             # weights.append(expected_reward(scene, action, self.global_memory, self.k))
-            exp, adv = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else (0, 0)
+            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
             expected.append(exp)
-            advantage.append(adv)
+            # advantage.append(adv)
+
+            # exp = 0
+            # advantage_count = 0
+            #
+            # subspace = self.global_memory.memory[self.global_memory.memory[:, ACTION_INDEX] == action]
+            #
+            # if self.global_memory.length > 0 and subspace.size > 0:
+            #     dist, ind = self.global_memory.knn[action].kneighbors([scene])
+            #     dist = dist[0]
+            #     ind = ind[0]
+            #
+            #     if 0 in dist:
+            #         index = ind[np.argwhere(dist == 0)][0][0]
+            #         indices.append(index)
+            #         prev_actions.append(subspace[index, ACTION_INDEX])
+            #         exp = subspace[index, REWARD_INDEX]
+            #     else:
+            #         dist = 1 / dist
+            #         dist = dist / np.sum(dist)
+            #
+            #         for ix, i in enumerate(ind):
+            #             adv = np.abs(subspace[i, ADVANTAGE_INDEX])
+            #             advantage_count += adv
+            #             exp += subspace[i, REWARD_INDEX]
+            #         exp = exp / self.k
+            #
+            # expected.append(exp)
 
         weights = np.array(expected)
 
         # Shift probabilities such that they are positive
         if weights.min() <= 0:
-            weights += weights.min() + 1
+            weights -= weights.min() - 1
 
         # Increase likelihood of better actions
         weights = weights ** decisiveness
@@ -201,8 +273,16 @@ class Agent:
         # Scale probabilities such that they are between [0, 1]
         weights = np.divide(weights, np.sum(weights))
 
+        # act = np.where(weights == weights.max())[0][0]
+        # weights = [1 - epsilon if i == act else epsilon / (self.actions.size - 1) for i, w in np.ndenumerate(weights)]
+
         # Choose an action probabilistically
         i = np.random.choice(np.arange(self.actions.size), p=weights)
+
+        # The reason this doesn't work is because index indexes an action subspace/buffer -- use memory space per action
+        # for ii in range(len(prev_actions)):
+        #     if prev_actions[ii] == self.actions[i]:
+        #         self.local_memory.Queue_For_Removal(indices[ii])
 
         return self.actions[i], expected[i]
 
@@ -211,8 +291,9 @@ class Agent:
 
     def Finish(self):
         self.local_memory.Advantage()
-        self.local_memory.memory = self.global_memory.Merge(self.local_memory, self.k, self.actions)
-        self.local_memory.length = 0
+        self.local_memory.Unique()
+        self.global_memory.Merge(self.local_memory, self.k, self.actions)
+        self.local_memory.Reset()
         # self.model.Finish()
 
 
@@ -373,11 +454,14 @@ if __name__ == "__main__":
     occipital.state_space = state_space
 
     # Global memory
-    memory_limit = 100000
+    memory_limit = 1000000
     hippocampus = Memory(occipital.state_space + NUM_ATTRIBUTES, memory_limit)
 
     # Agent
     agent = Agent(occipital, hippocampus, action_space, 1000, 1000, reward_discount=1, k=11)
+
+    epoch = 100
+    epoch_rewards = []
 
     for run_through in range(100000):
         # Initialize environment
@@ -385,17 +469,18 @@ if __name__ == "__main__":
 
         rewards = []
 
-        for t in range(10000):
+        for t in range(1000):
             # Display environment
-            # env.render()
+            # if run_through > 200:
+            #     env.render()
 
             # Get scene from model
             # sc = agent.Model(s)
-            # sc = np.array([round(elem, 10) for elem in s])
-            sc = s
+            sc = np.array([round(elem, 1) for elem in s])
+            # sc = s
 
             # Get action and expected reward
-            a, e = agent.Act(sc, min(run_through ** 0.8 / 10, 7))
+            a, e = agent.Act(sc, min(run_through * 10, 100))
 
             # Execute action
             s, r, done, info = env.step(a)
@@ -407,9 +492,15 @@ if __name__ == "__main__":
 
             # Break at end of run-through
             if done:
-                print("Run-through {} finished after {} timesteps with reward {}".format(run_through + 1, t + 1,
-                                                                                         sum(rewards)))
+                # print("Run-through {} finished after {} timesteps with reward {}".format(run_through + 1, t + 1,
+                #                                                                          sum(rewards)))
                 break
+
+        epoch_rewards.append(sum(rewards))
+        if not run_through % epoch:
+            print("Last {} run-through reward average: {}".format(epoch, np.mean(epoch_rewards)))
+            print("* {} memories stored".format(agent.global_memory.length))
+            epoch_rewards = []
 
         # Dump run-through's memories into global memory
         agent.Finish()
