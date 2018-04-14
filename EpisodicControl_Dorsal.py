@@ -217,8 +217,8 @@ class Agent:
         self.model = model
         self.local_memory = Memory(self.model.state_space + NUM_ATTRIBUTES, self.memory_horizon, self.reward_horizon)
 
-    def Model(self, state):
-        return self.model.Update(state)
+    def Model(self, state, r):
+        return self.model.Update(state, r)
 
     def Act(self, scene, decisiveness, important=None, relation=None):
         # Initialize probabilities
@@ -238,12 +238,61 @@ class Agent:
                     dist[i] = 1.
             return dist
 
+        def relate(x, y, imp, rel):
+            objects_x = x.reshape((-1, 5))
+            objects_y = y.reshape((-1, 5))
+
+            x_neighbors = NearestNeighbors(n_neighbors=1)
+            x_neighbors.fit(objects_x)
+
+            x_imp_dist, x_imp_ind = x_neighbors.kneighbors(imp)
+            x_imp_ind = x_imp_ind[0][0]
+
+            x_imp = objects_x[x_imp_ind]
+
+            x_rel_dist, x_rel_ind = x_neighbors.kneighbors(rel) # assret does not equal x_imp_ind
+            x_rel_ind = x_rel_ind[0][0]
+
+            x_rel = objects_x[x_rel_ind]
+
+            y_neighbors = NearestNeighbors(n_neighbors=1)
+            y_neighbors.fit(objects_y)
+
+            y_imp_dist, y_imp_ind = y_neighbors.kneighbors(imp)
+            y_imp_ind = y_imp_ind[0][0]
+
+            y_imp = objects_y[y_imp_ind]
+
+            y_rel_dist, y_rel_ind = y_neighbors.kneighbors(rel)
+            y_rel_ind = y_rel_ind[0][0]
+
+            y_rel = objects_y[y_rel_ind]
+
+            return np.linalg.norm(np.array([x_imp, x_rel]) - np.array([y_imp, y_rel])) * (x_imp_dist + x_rel_dist +
+                                                                                          y_imp_dist + y_rel_dist)
+
         # Get expected reward for each action
         for action in self.actions:
             # weights.append(expected_reward(scene, action, self.global_memory, self.k))
-            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-            expected.append(exp)
+            if important is None:
+                exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+                expected.append(exp)
+            else:
+                subspace = self.global_memory.memory[self.global_memory.memory[:, ACTION_INDEX] == action]
+                subspace_size = subspace.shape[0]
+                if subspace_size == 0:
+                    subspace = np.zeros((1, self.global_memory.memory_size))
+                    subspace_size = 1
+
+                relatenn = {action: KNeighborsRegressor(n_neighbors=min(self.k, subspace_size), weights=duplicate_weights,
+                                                        metric=relate, metric_params={"imp": important, "rel": relation})}
+
+                relatenn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, REWARD_INDEX])
+
+                exp = relatenn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+                expected.append(exp)
             # advantage.append(adv)
+
 
             # exp = 0
             # advantage_count = 0
@@ -401,6 +450,9 @@ class SLIC:
 
 # Felsenszwalb’s efficient graph based image segmentation
 class Felsenszwalb:
+    important_object = None
+    relation = None
+
     class Object:
         index = None
         area = None
@@ -408,6 +460,7 @@ class Felsenszwalb:
         y = None
         trajectory_x = 0
         trajectory_y = 0
+        importance = 0
         previous = None
 
         def array(self):
@@ -469,6 +522,8 @@ class Felsenszwalb:
                 self.objects[x].trajectory_x = self.objects[x].x - self.objects[x].previous.x
                 self.objects[x].trajectory_y = self.objects[x].y - self.objects[x].previous.y
 
+                self.objects[x].importance = self.objects[x].previous.importance
+
                 self.array[x, 3] = self.objects[x].trajectory_x
                 self.array[x, 4] = self.objects[x].trajectory_y
 
@@ -490,12 +545,14 @@ class Felsenszwalb:
         self.state = None
         self.segments = None
 
+        self.time_of_consideration = 0
+
         if self.object_capacity is not None and self.property_capacity is not None:
             self.state_space = self.object_capacity * self.property_capacity
 
         self.model = self.Model()
 
-    def Update(self, state, scale=3.0, sigma=0.1, min_size=1):
+    def Update(self, state, reward, scale=3.0, sigma=0.1, min_size=1):
         self.state = state
 
         # Greyscale
@@ -524,9 +581,38 @@ class Felsenszwalb:
 
         scene = self.model.scene(self.object_capacity, self.property_capacity)
 
+        # if self.important_object is not None and self.relation is not None and reward > 0:
+
+        if reward > 0:
+            self.time_of_consideration = 10
+
+        if self.time_of_consideration > 0:
+            trajectory_changes = [o for o in self.model.objects
+                                  if np.sign(o.trajectory_x) != np.sign(o.previous.trajectory_x)
+                                  or np.sign(o.trajectory_y) != np.sign(o.previous.trajectory_y)]
+
+            trajectory_changes.sort(key=lambda x: np.abs(x.trajectory_x - x.previous.trajectory_x) +
+                                    np.abs(x.trajectory_y - x.previous.trajectory_y), reverse=True)
+
+            for o in trajectory_changes[:min(5, len(trajectory_changes))]:
+                o.importance += 1
+
+            self.time_of_consideration = max(0, self.time_of_consideration - 1)
+
+        self.important_object = max(self.model.objects, key=lambda x: x.importance)
+        other_objects = [i for i in self.model.objects if i.index != self.important_object.index]
+
+        self.relation = min(other_objects, key=lambda x: np.linalg.norm(
+            np.array([self.important_object.x, self.important_object.y]) - np.array([x.x, x.y])))
+
+        use_relation = False
+
+        if self.relation.importance > 0:
+            use_relation = True
+
         self.model.finish()
 
-        return scene
+        return scene, use_relation, self.important_object.array(), self.relation.array()
 
     def Show(self):
         if self.state is not None and self.segments is not None:
@@ -549,16 +635,16 @@ if __name__ == "__main__":
     ADVANTAGE_INDEX = -1
 
     # Environment
-    env = gym.make('CartPole-v0')
-    action_space = np.arange(env.action_space.n)
-    objects = None
-    properties = None
-    state_space = env.observation_space.shape[0]
+    # env = gym.make('CartPole-v0')
+    # action_space = np.arange(env.action_space.n)
+    # objects = None
+    # properties = None
+    # state_space = env.observation_space.shape[0]
 
     # Environment
-    # env = gym.make('Breakout-v0')
-    # action_space = np.arange(env.action_space.n)
-    # objects = 22
+    env = gym.make('Breakout-v0')
+    action_space = np.arange(env.action_space.n)
+    objects = 22
 
     # Environment
     # env = gym.make('SpaceInvaders-v0')
@@ -567,30 +653,29 @@ if __name__ == "__main__":
 
     # Visual model
     occipital = Felsenszwalb(objects)
-    occipital.state_space = state_space
+    # occipital.state_space = state_space
 
     # Global memory
-    memory_limit = 100000
+    memory_limit = 20
     hippocampus = Memory(occipital.state_space + NUM_ATTRIBUTES, memory_limit)
 
-    K = 45
-    REWARD_DISCOUNT = 0.999
-
     # Agent
-    agent = Agent(occipital, hippocampus, action_space, 10000, 10000, reward_discount=REWARD_DISCOUNT, k=K)
+    agent = Agent(occipital, hippocampus, action_space, 20, 20, reward_discount=0.999, k=7)
 
-    epoch = 100
+    epoch = 1
     epoch_rewards = []
-    model_times = []
-    act_times = []
-    learn_times = []
-    finish_times = []
+    times = []
+
+    sc = [0, 0]
+    r = 0
+
+    time_of_consid = 0
 
     for run_through in range(10000):
-        rewards = []
-
         # Initialize environment
         s = env.reset()
+
+        rewards = []
 
         for t in range(1000):
 
@@ -598,39 +683,48 @@ if __name__ == "__main__":
             # if run_through > 6:
             # env.render()
 
-            start = time.time()
+            if time_of_consid == 0:
+                start = time.time()
 
-            # Get scene from model
-            # sc = agent.Model(s)
-            # sc = np.array([round(elem, 1) for elem in s])
-            sc = s
+                # Get scene from model
+                sc = agent.Model(s, r)
+                # sc = np.array([round(elem, 1) for elem in s])
+                # sc = s
 
-            end = time.time()
-            model_times.append(end - start)
-            # print("Model time: {}".format(end - start))
+                end = time.time()
+                times.append(end - start)
+                # print("Model time: {}".format(end - start))
 
-            start = time.time()
+            if sc[1] or time_of_consid > 0:
+                a, e = agent.Act(sc[0], min(run_through * 10, 100), important=sc[2], relation=sc[3])
 
-            # Get action and expected reward
-            # a, e = (a, e) if t % 4 else agent.Act(sc, min(run_through * 20, 100))
-            a, e = agent.Act(sc, min(run_through * 10, 100))
+                if np.abs(r - e) < 5 or r > 0:
+                    time_of_consid += 5
+                else:
+                    time_of_consid = max(0, time_of_consid - 1)
+            else:
+                # start = time.time()
 
-            end = time.time()
-            act_times.append(end - start)
+                # Get action and expected reward
+                # a, e = (a, e) if t % 4 else agent.Act(sc, min(run_through * 20, 100))
+                a, e = agent.Act(sc[0], min(run_through * 10, 100))
+
+                # end = time.time()
+                # print("Action time: {}".format(end - start))
 
             # Execute action
             s, r, done, info = env.step(a)
 
             rewards.append(r)
 
-            start = time.time()
+            # start = time.time()
 
-            # Consider learning only when abs(adv) is high
             # Learn from the reward
-            agent.Learn(sc, a, r, e)
+            if r > 0:
+                agent.Learn(sc[0], a, r, e)
 
-            end = time.time()
-            learn_times.append(end - start)
+            # end = time.time()
+            # print("Learning time: {}".format(end - start))
 
             # Break at end of run-through
             if done:
@@ -638,24 +732,13 @@ if __name__ == "__main__":
                 #                                                                          sum(rewards)))
                 break
 
-        start = time.time()
+        epoch_rewards.append(sum(rewards))
+        if not run_through % epoch:
+            print("Last {} run-through reward average: {}".format(epoch, np.mean(epoch_rewards)))
+            print("* {} memories stored".format(agent.global_memory.length))
+            print("* Average modeling time: {}".format(np.mean(times)))
+            epoch_rewards = []
+            times = []
 
         # Dump run-through's memories into global memory
         agent.Finish()
-
-        end = time.time()
-        finish_times.append(end - start)
-
-        epoch_rewards.append(sum(rewards))
-        if not run_through % epoch:
-            print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
-            print("* {} memories stored".format(agent.global_memory.length))
-            print("* Average modeling time: {}".format(np.mean(model_times)))
-            print("* Average acting time: {}".format(np.mean(act_times)))
-            print("* Average learning time: {}".format(np.mean(learn_times)))
-            print("* Average finishing time: {}".format(np.mean(finish_times)))
-            epoch_rewards = []
-            model_times = []
-            act_times = []
-            learn_times = []
-            finish_times = []
