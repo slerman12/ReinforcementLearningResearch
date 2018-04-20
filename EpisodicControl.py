@@ -1,10 +1,14 @@
 from __future__ import division
+
+import warnings
+
 import numpy as np
 import cv2
 import gym
 import time
 import copy
-from sklearn import random_projection
+
+from sklearn import random_projection, preprocessing
 from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
 from skimage.segmentation import slic, felzenszwalb
@@ -81,16 +85,20 @@ class Memory:
     knn = {}
     remove = np.array([])
 
-    def __init__(self, memory_size, memory_horizon, reward_horizon=1):
+    def __init__(self, memory_size, memory_horizon):
         self.memory_size = memory_size
         self.memory_horizon = memory_horizon
-        self.reward_horizon = reward_horizon
 
         self.memory = np.zeros((1, self.memory_size))
 
-    def Update(self, scene, action, reward, reward_discount, expected):
+    def Add(self, scene, action, reward, expected):
+        attributes = np.zeros(NUM_ATTRIBUTES)
+        attributes[ACTION_INDEX] = action
+        attributes[REWARD_INDEX] = reward
+        attributes[EXPECTED_INDEX] = expected
+
         # Insert scene into memory
-        self.memory = np.insert(self.memory, 0, np.append(scene, [action, reward, expected, 0]), axis=0)
+        self.memory = np.insert(self.memory, 0, np.append(scene, attributes), axis=0)
 
         # Remove initial zeros
         if self.length == 0:
@@ -103,16 +111,16 @@ class Memory:
             self.length += 1
 
         # Add discounted rewards
-        for i in range(1, min(self.reward_horizon, self.length)):
-            # self.memory[i, -1] += reward * (1 - (i / self.reward_horizon)**reward_discount)
-            # self.memory[i, -1] += reward * (np.math.exp(-i))
-            self.memory[i, REWARD_INDEX] += reward * (reward_discount ** i)
+        # for i in range(1, min(self.reward_horizon, self.length)):
+        #     # self.memory[i, -1] += reward * (1 - (i / self.reward_horizon)**reward_discount)
+        #     # self.memory[i, -1] += reward * (np.math.exp(-i))
+        #     self.memory[i, REWARD_INDEX] += reward * (reward_discount ** i)
 
-    def Advantage(self, advantage_cutoff=None):
-        self.memory[:, ADVANTAGE_INDEX] = self.memory[:, REWARD_INDEX] - self.memory[:, EXPECTED_INDEX]
-        if advantage_cutoff is not None:
-            self.memory = self.memory[np.abs(self.memory[:, ADVANTAGE_INDEX]) > advantage_cutoff]
-            self.length = self.memory.shape[0]
+    # def Advantage(self, advantage_cutoff=None):
+    #     self.memory[:, ADVANTAGE_INDEX] = self.memory[:, REWARD_INDEX] - self.memory[:, EXPECTED_INDEX]
+    #     if advantage_cutoff is not None:
+    #         self.memory = self.memory[np.abs(self.memory[:, ADVANTAGE_INDEX]) > advantage_cutoff]
+    #         self.length = self.memory.shape[0]
 
     def Queue_For_Removal(self, index):
         if index not in self.remove:
@@ -139,7 +147,28 @@ class Memory:
         self.remove = np.array([])
 
     # Merge and clear
-    def Merge(self, m, k, actions):
+    def Learn(self, m, k, actions, reward_discount):
+        # Temporal value difference error
+        # Compute values
+        m.memory[0, VALUE_INDEX] = m.memory[0, REWARD_INDEX]
+
+        # Dynamic programming using Bellman equation to computes values in linear time
+        for i in range(1, m.length):
+            # print(m.memory[i, REWARD_INDEX])
+            # print(reward_discount * m.memory[i - 1, VALUE_INDEX])
+            # print(m.memory[i, REWARD_INDEX] + reward_discount * m.memory[i - 1, VALUE_INDEX])
+            # print("BLA")
+            m.memory[i, VALUE_INDEX] = m.memory[i, REWARD_INDEX] + reward_discount * m.memory[i - 1, VALUE_INDEX]
+
+            bellman_LHS = m.memory[i, EXPECTED_INDEX]
+            bellman_RHS = m.memory[i, REWARD_INDEX] + reward_discount * m.memory[i - 1, EXPECTED_INDEX]
+
+            m.memory[i, TD_ERROR_INDEX] = bellman_RHS - bellman_LHS
+
+        # keep = np.argsort(-m.memory[:, TD_ERROR_INDEX])[:80]
+        #
+        # m.memory = m.memory[keep]
+
         # If duplicate, use max reward
         # for i in m.remove:
         #     i = int(i)
@@ -153,12 +182,15 @@ class Memory:
         #         m.memory[duplicate, REWARD_INDEX] = self.memory[i, REWARD_INDEX]
         duplicates = []
 
+        # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
         for mem in m.memory:
             try:
+                # This in particular is likely the cause
                 duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
 
-                if self.memory[duplicate, REWARD_INDEX] > mem[REWARD_INDEX]:
+                if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
                     mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
+                    mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
 
                 duplicates.append(duplicate)
             except IndexError:
@@ -167,11 +199,17 @@ class Memory:
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
 
+        # normalizer = preprocessing.Normalizer().fit(m.memory)
+        #
+        # m.memory = normalizer.transform(m.memory)
+
         # Merge memories
         if self.length == 0:
             self.memory = m.memory
         else:
             self.memory = np.concatenate((m.memory, self.memory), axis=0)
+
+        # Above and below are technically separate concerns. Above is still just updating/merging, below is learning
 
         # Update memory length
         self.length += m.length - len(duplicates)
@@ -193,6 +231,7 @@ class Memory:
         # def advantage_distance(x, y):
         #     return np.linalg.norm(x[:-NUM_ATTRIBUTES] - y[:-NUM_ATTRIBUTES])
 
+        # This is  slow -- bottleneck
         for action in actions:
             # self.knn[action] = NearestNeighbors(n_neighbors=k)
             # self.knn[action].fit(self.memory[self.memory[:, -2] == action, :-2])
@@ -201,26 +240,29 @@ class Memory:
             if subspace_size == 0:
                 subspace = np.zeros((1, self.memory_size))
                 subspace_size = 1
-            self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights)
-            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, REWARD_INDEX])
+            self.knn[action] = NearestNeighbors(n_neighbors=min(k, subspace_size))
+            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES])
+            # self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights)
+            # self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
 
 class Agent:
-    def __init__(self, model, global_memory, actions, memory_horizon, reward_horizon, reward_discount, k):
+    def __init__(self, model, global_memory, actions, memory_horizon, reward_horizon, reward_discount, decisiveness, k):
         self.global_memory = global_memory
         self.actions = actions
         self.memory_horizon = memory_horizon
         self.reward_horizon = reward_horizon
         self.reward_discount = reward_discount
+        self.decisiveness = decisiveness
         self.k = k
 
         self.model = model
-        self.local_memory = Memory(self.model.state_space + NUM_ATTRIBUTES, self.memory_horizon, self.reward_horizon)
+        self.local_memory = Memory(self.model.state_space + NUM_ATTRIBUTES, self.memory_horizon)
 
     def Model(self, state):
         return self.model.Update(state)
 
-    def Act(self, scene, decisiveness, important=None, relation=None):
+    def Act(self, scene, epsilon):
         # Initialize probabilities
         expected = []
         # advantage = []
@@ -241,54 +283,89 @@ class Agent:
         # Get expected reward for each action
         for action in self.actions:
             # weights.append(expected_reward(scene, action, self.global_memory, self.k))
-            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-            expected.append(exp)
+            # exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+            # expected.append(exp)
             # advantage.append(adv)
 
-            # exp = 0
+            exp = 0
             # advantage_count = 0
-            #
-            # subspace = self.global_memory.memory[self.global_memory.memory[:, ACTION_INDEX] == action]
-            #
-            # if self.global_memory.length > 0 and subspace.size > 0:
-            #     dist, ind = self.global_memory.knn[action].kneighbors([scene])
-            #     dist = dist[0]
-            #     ind = ind[0]
-            #
-            #     if 0 in dist:
-            #         index = ind[np.argwhere(dist == 0)][0][0]
-            #         indices.append(index)
-            #         prev_actions.append(subspace[index, ACTION_INDEX])
-            #         exp = subspace[index, REWARD_INDEX]
-            #     else:
-            #         dist = 1 / dist
-            #         dist = dist / np.sum(dist)
-            #
-            #         for ix, i in enumerate(ind):
-            #             adv = np.abs(subspace[i, ADVANTAGE_INDEX])
-            #             advantage_count += adv
-            #             exp += subspace[i, REWARD_INDEX]
-            #         exp = exp / self.k
-            #
-            # expected.append(exp)
+            TD_count = 0
+
+            subspace = self.global_memory.memory[self.global_memory.memory[:, ACTION_INDEX] == action]
+
+            if self.global_memory.length > 0 and subspace.size > 0:
+                dist, ind = self.global_memory.knn[action].kneighbors([scene])
+                dist = dist[0]
+                ind = ind[0]
+                exp = 0
+                # adv = 0
+                #
+                # for ix in ind:
+                #     # exp += subspace[ix, VALUE_INDEX] - subspace[ix, EXPECTED_INDEX]
+                #     # exp += subspace[ix, VALUE_INDEX] - subspace[ix, REWARD_INDEX]
+                #     exp += subspace[ix, VALUE_INDEX]
+                # exp = exp / self.k
+
+                if 0 in dist:
+                    index = ind[np.argwhere(dist == 0)][0][0]
+                    # indices.append(index)
+                    # prev_actions.append(subspace[index, ACTION_INDEX])
+                    exp = subspace[index, VALUE_INDEX]
+                else:
+                    dist = 1 / dist
+                    dist = dist / np.sum(dist)
+
+                    for ix, i in enumerate(ind):
+                        # adv = np.abs(subspace[i, ADVANTAGE_INDEX])
+                        # advantage_count += adv
+                        # abs_TD_error = np.abs(subspace[i, TD_ERROR_INDEX])
+                        # TD_count += abs_TD_error
+                        # exp += subspace[i, VALUE_INDEX] * abs_TD_error
+                        exp += subspace[i, VALUE_INDEX]
+                    # if TD_count != 0:
+                    #     exp = exp / (self.k * TD_count)
+                    # else:
+                    #     exp = exp / self.k
+
+                    exp = exp / self.k
+
+            expected.append(exp)
 
         weights = np.array(expected)
 
-        # Shift probabilities such that they are positive
-        if weights.min() <= 0:
-            weights -= weights.min() - 1
+        # # Shift probabilities such that they are positive
+        # if weights.min() <= 0:
+        #     weights -= weights.min() - 1
+        #
+        # def weigh_weights(w):
+        #     # Increase likelihood of better actions
+        #     new = None
+        #
+        #     warnings.filterwarnings("error")
+        #
+        #     try:
+        #         new = np.power(w, self.decisiveness)
+        #     except RuntimeWarning:
+        #         self.decisiveness -= 1
+        #         new = weigh_weights(w)
+        #
+        #     return new
+        #
+        # weights = weigh_weights(weights)
 
-        # Increase likelihood of better actions
-        weights = weights ** decisiveness
+        # weights = np.power(weights, self.decisiveness)
 
         # Scale probabilities such that they are between [0, 1]
-        weights = np.divide(weights, np.sum(weights))
+        # weights = np.divide(weights, np.sum(weights))
 
         # act = np.where(weights == weights.max())[0][0]
         # weights = [1 - epsilon if i == act else epsilon / (self.actions.size - 1) for i, w in np.ndenumerate(weights)]
+        # weights = [w * epsilon if w != weights.max() else w for w in weights] # can change * to **
 
         # Choose an action probabilistically
-        i = np.random.choice(np.arange(self.actions.size), p=weights)
+        # i = np.random.choice(np.arange(self.actions.size), p=weights)
+        i = np.random.choice(np.arange(2), p=np.array([epsilon, 1 - epsilon]))
+        i = np.random.choice(np.arange(self.actions.size)) if i == 0 else weights.argmax()
 
         # The reason this doesn't work is because index indexes an action subspace/buffer -- use memory space per action
         # for ii in range(len(prev_actions)):
@@ -298,12 +375,12 @@ class Agent:
         return self.actions[i], expected[i]
 
     def Learn(self, scene, action, reward, expected):
-        self.local_memory.Update(scene, action, reward, self.reward_discount, expected)
+        self.local_memory.Add(scene, action, reward, expected)
 
     def Finish(self):
-        self.local_memory.Advantage()
+        # self.local_memory.Advantage()
         # self.local_memory.Unique()
-        self.global_memory.Merge(self.local_memory, self.k, self.actions)
+        self.global_memory.Learn(self.local_memory, self.k, self.actions, self.reward_discount)
         self.local_memory.Reset()
         # self.model.Finish()
 
@@ -334,27 +411,30 @@ class Projection:
 
 # Lower dimension projection of state
 class RandomProjection:
-    def __init__(self, memory_capacity, state_size, dimension, size=None):
-        self.memory_capacity = memory_capacity
+    def __init__(self, dimension, size=None):
         self.dimension = dimension
         self.size = size
 
-        self.projection = random_projection.GaussianRandomProjection(dimension).fit(
-            np.zeros((self.memory_capacity, state_size)))
+        self.projection = None
         self.state_space = self.dimension
 
-    def Update(self, state):
+    def Update(self, state, greyscale=False, flatten=False):
         # Greyscale
-        state = np.dot(state[..., :3], [0.299, 0.587, 0.114])
+        if greyscale:
+            state = np.dot(state[..., :3], [0.299, 0.587, 0.114])
 
         # Image resize
         if self.size is not None:
             state = cv2.resize(state, dsize=self.size)
 
         # Lower dimension projection
-        state = state.flatten()
+        if flatten:
+            state = state.flatten()
 
-        return self.projection.transform(state)
+        if self.projection is None:
+            self.projection = random_projection.GaussianRandomProjection(self.dimension).fit([state])
+
+        return self.projection.transform([state])[0]
 
 
 # SLIC image segmentation
@@ -413,6 +493,10 @@ class Felsenszwalb:
         def array(self):
             return np.ndarray((1, 5), buffer=np.array([self.area, self.x, self.y, self.trajectory_x, self.trajectory_y]))
 
+        def __eq__(self, another):
+            # Might be good to not include 'previous' attribute
+            return self.__dict__ == another.__dict__
+
     class Model:
         objects = []
         length = 0
@@ -435,6 +519,7 @@ class Felsenszwalb:
             for o in self.objects:
                 o.previous = None
 
+        # A bit slow
         def finish(self):
             self.forget()
             self.previous = copy.deepcopy(self)
@@ -506,19 +591,27 @@ class Felsenszwalb:
 
         props = regionprops(self.segments)
 
+        # print(len(props))
+
         # Can maybe speed up by only updating changed objects
         for obj in range(len(props)):
             o = self.Object()
 
             o.index = obj
-            o.area = props[obj].area
-            o.x = props[obj].centroid[0]
-            o.y = props[obj].centroid[1]
+            o.area = round(props[obj].area)
+            o.x = round(props[obj].centroid[0])
+            o.y = round(props[obj].centroid[1])
 
             self.model.add(o)
 
         if self.model.previous is None:
             self.model.previous = self.model
+
+        scene = self.model.scene(self.object_capacity, self.property_capacity)
+
+        # self.model.finish()
+        #
+        # return scene
 
         self.model.prev_objects()
 
@@ -539,14 +632,20 @@ class Felsenszwalb:
             # Plot
             plt.show()
 
+    def __eq__(self, another):
+        # Might be good to not include 'previous' attribute
+        return self.__dict__ == another.__dict__
+
 
 # Main method
 if __name__ == "__main__":
-    NUM_ATTRIBUTES = 4
-    ACTION_INDEX = -4
-    REWARD_INDEX = -3
+    NUM_ATTRIBUTES = 5
+    ACTION_INDEX = -NUM_ATTRIBUTES
+    REWARD_INDEX = -4
+    VALUE_INDEX = -3
     EXPECTED_INDEX = -2
-    ADVANTAGE_INDEX = -1
+    TD_ERROR_INDEX = -1
+
 
     # Environment
     env = gym.make('CartPole-v0')
@@ -556,9 +655,9 @@ if __name__ == "__main__":
     state_space = env.observation_space.shape[0]
 
     # Environment
-    # env = gym.make('Breakout-v0')
+    # env = gym.make('Pong-v0')
     # action_space = np.arange(env.action_space.n)
-    # objects = 22
+    # objects = 12
 
     # Environment
     # env = gym.make('SpaceInvaders-v0')
@@ -567,17 +666,16 @@ if __name__ == "__main__":
 
     # Visual model
     occipital = Felsenszwalb(objects)
+    # occipital2 = RandomProjection(10)
+    # state_space = 10
     occipital.state_space = state_space
 
     # Global memory
-    memory_limit = 100000
+    memory_limit = 1000000
     hippocampus = Memory(occipital.state_space + NUM_ATTRIBUTES, memory_limit)
 
-    K = 45
-    REWARD_DISCOUNT = 0.999
-
     # Agent
-    agent = Agent(occipital, hippocampus, action_space, 10000, 10000, reward_discount=REWARD_DISCOUNT, k=K)
+    agent = Agent(occipital, hippocampus, action_space, 10000, 10000, reward_discount=0.999, decisiveness=0, k=45)
 
     epoch = 100
     epoch_rewards = []
@@ -586,24 +684,30 @@ if __name__ == "__main__":
     learn_times = []
     finish_times = []
 
+    print("K is 45, r discount .999, exploration 10s")
+
     for run_through in range(10000):
-        rewards = []
+        rewards = 0
 
         # Initialize environment
         s = env.reset()
 
-        for t in range(1000):
+        for t in range(250):
 
             # Display environment
-            # if run_through > 6:
-            # env.render()
+            if run_through > 400:
+                env.render()
 
             start = time.time()
 
             # Get scene from model
             # sc = agent.Model(s)
+            # sc = occipital2.Update(sc)
             # sc = np.array([round(elem, 1) for elem in s])
             sc = s
+
+            # print(sc)
+            # print("BLAAAA\n")
 
             end = time.time()
             model_times.append(end - start)
@@ -611,17 +715,39 @@ if __name__ == "__main__":
 
             start = time.time()
 
+            # test increasing k values
+            # stabilize epsilon
+            # see why improvement sometimes fails from offset
+            # see why Finish takes so much time
+
+            # agent.decisiveness = 100
+            # agent.k = 100
+            # agent.decisiveness = min(run_through, 100)
+            # agent.decisiveness = run_through % 100
+            # if epoch < 2:
+            #     agent.decisiveness = 0.5
+            # else:
+            #     agent.decisiveness = 100
+            # agent.decisiveness = (np.random.normal(run_through) / np.random.normal(100, 10)) + 100 * np.abs(np.sin(run_through / 10))
+            # agent.k = round(agent.global_memory.length / 1600) + 4
+
             # Get action and expected reward
             # a, e = (a, e) if t % 4 else agent.Act(sc, min(run_through * 20, 100))
-            a, e = agent.Act(sc, min(run_through * 10, 100))
+            a, e = agent.Act(scene=sc, epsilon=max(min(10 / (run_through + 10), 1), 0.001))
 
             end = time.time()
             act_times.append(end - start)
 
             # Execute action
+            # re = 0
+            # for _ in range(4):
             s, r, done, info = env.step(a)
+            #     re += r
+            #     if done:
+            #         break
+            # r = re
 
-            rewards.append(r)
+            rewards += r
 
             start = time.time()
 
@@ -646,14 +772,14 @@ if __name__ == "__main__":
         end = time.time()
         finish_times.append(end - start)
 
-        epoch_rewards.append(sum(rewards))
+        epoch_rewards.append(rewards)
         if not run_through % epoch:
             print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
             print("* {} memories stored".format(agent.global_memory.length))
             print("* Average modeling time: {}".format(np.mean(model_times)))
             print("* Average acting time: {}".format(np.mean(act_times)))
             print("* Average learning time: {}".format(np.mean(learn_times)))
-            print("* Average finishing time: {}".format(np.mean(finish_times)))
+            print("* Average finishing time: {}\n".format(np.mean(finish_times)))
             epoch_rewards = []
             model_times = []
             act_times = []
