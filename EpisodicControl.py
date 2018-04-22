@@ -675,7 +675,7 @@ if __name__ == "__main__":
     hippocampus = Memory(occipital.state_space + NUM_ATTRIBUTES, memory_limit)
 
     # Agent
-    agent = Agent(occipital, hippocampus, action_space, 10000, 10000, reward_discount=0.999, decisiveness=0, k=45)
+    agent = Agent(occipital, hippocampus, action_space, 10000, 10000, reward_discount=0.999, decisiveness=0, k=50)
 
     epoch = 100
     epoch_rewards = []
@@ -683,8 +683,7 @@ if __name__ == "__main__":
     act_times = []
     learn_times = []
     finish_times = []
-
-    print("K is 45, r discount .999, exploration 10s")
+    exploration = 0
 
     for run_through in range(10000):
         rewards = 0
@@ -703,7 +702,7 @@ if __name__ == "__main__":
             # Get scene from model
             # sc = agent.Model(s)
             # sc = occipital2.Update(sc)
-            # sc = np.array([round(elem, 1) for elem in s])
+            # sc = np.array([round(elem, 3) for elem in s])
             sc = s
 
             # print(sc)
@@ -733,7 +732,8 @@ if __name__ == "__main__":
 
             # Get action and expected reward
             # a, e = (a, e) if t % 4 else agent.Act(sc, min(run_through * 20, 100))
-            a, e = agent.Act(scene=sc, epsilon=max(min(10 / (run_through + 10), 1), 0.001))
+            exploration = max(min(10 / (run_through + 10), 1), 0.005)
+            a, e = agent.Act(scene=sc, epsilon=exploration)
 
             end = time.time()
             act_times.append(end - start)
@@ -776,6 +776,7 @@ if __name__ == "__main__":
         if not run_through % epoch:
             print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
             print("* {} memories stored".format(agent.global_memory.length))
+            print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, exploration))
             print("* Average modeling time: {}".format(np.mean(model_times)))
             print("* Average acting time: {}".format(np.mean(act_times)))
             print("* Average learning time: {}".format(np.mean(learn_times)))
