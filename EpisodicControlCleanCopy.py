@@ -140,21 +140,21 @@ class Memory:
 
 
 class Agent:
-    def __init__(self, model, global_memory, actions, memory_horizon, reward_horizon, reward_discount, k):
+    def __init__(self, model, global_memory, actions, local_memory_horizon, gamma, epsilon, k):
         self.global_memory = global_memory
         self.actions = actions
-        self.memory_horizon = memory_horizon
-        self.reward_horizon = reward_horizon
-        self.reward_discount = reward_discount
+        self.local_memory_horizon = local_memory_horizon
+        self.reward_discount = gamma
+        self.epsilon = epsilon
         self.k = k
 
         self.model = model
-        self.local_memory = Memory(self.model.state_space + NUM_ATTRIBUTES, self.memory_horizon)
+        self.local_memory = Memory(self.model.state_space + NUM_ATTRIBUTES, self.local_memory_horizon)
 
     def Model(self, state):
         return self.model.Update(state)
 
-    def Act(self, scene, epsilon):
+    def Act(self, scene):
         # Initialize probabilities
         expected = []
 
@@ -165,7 +165,7 @@ class Agent:
 
         weights = np.array(expected)
 
-        i = np.random.choice(np.arange(2), p=np.array([epsilon, 1 - epsilon]))
+        i = np.random.choice(np.arange(2), p=np.array([self.epsilon, 1 - self.epsilon]))
         i = np.random.choice(np.arange(self.actions.size)) if i == 0 else weights.argmax()
 
         return self.actions[i], expected[i]
@@ -388,22 +388,21 @@ if __name__ == "__main__":
     occipital.state_space = state_space
 
     # Global memory
-    memory_limit = 1000000
-    hippocampus = Memory(occipital.state_space + NUM_ATTRIBUTES, memory_limit)
+    global_memory_horizon = 1000000
+    hippocampus = Memory(occipital.state_space + NUM_ATTRIBUTES, global_memory_horizon)
 
     # Agent
-    agent = Agent(occipital, hippocampus, action_space, 10000, 10000, reward_discount=0.999, k=50)
+    agent = Agent(occipital, hippocampus, action_space, local_memory_horizon=1000, gamma=0.999, epsilon=1, k=50)
 
     epoch = 100
 
+    # Initialize metric variables for measuring performance
     epoch_rewards = []
     epoch_model_times = []
     epoch_act_times = []
     epoch_learn_times = []
     epoch_finish_times = []
     epoch_run_through_times = []
-
-    exploration = 0
     prog = None
 
     for run_through in range(10000):
@@ -435,9 +434,8 @@ if __name__ == "__main__":
             start = time.time()
 
             # Likelihood of picking a random action
-            # exploration = 1 / (run_through + 1)
-            exploration = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
-            a, e = agent.Act(scene=sc, epsilon=exploration)
+            agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
+            a, e = agent.Act(scene=sc)
 
             end = time.time()
             act_times += end - start
@@ -481,7 +479,7 @@ if __name__ == "__main__":
             if run_through > 0:
                 print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
                 print("* {} memories stored".format(agent.global_memory.length))
-                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, exploration))
+                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, agent.epsilon))
                 print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
                 print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
                 print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
