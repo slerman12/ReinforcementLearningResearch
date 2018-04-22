@@ -397,7 +397,7 @@ if __name__ == "__main__":
             start = time.time()
 
             # Likelihood of picking a random action
-            exploration = max(min(10 / (run_through + 10), 1), 0.005)
+            exploration = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
             a, e = agent.Act(scene=sc, epsilon=exploration)
 
             end = time.time()
