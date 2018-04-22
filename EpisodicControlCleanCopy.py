@@ -4,12 +4,40 @@ import cv2
 import gym
 import time
 import copy
+import sys
 from sklearn import random_projection
 from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
 from skimage.segmentation import felzenszwalb
 from skimage.segmentation import mark_boundaries
 import matplotlib.pyplot as plt
+
+
+# Display progress in console
+class Progress:
+    # Initialize progress measures
+    progress_complete = 0.00
+    progress_total = 0.00
+    name = ""
+    show = True
+
+    def __init__(self, pc, pt, name, show):
+        self.progress_complete = pc
+        self.progress_total = pt
+        self.name = name
+        self.show = show
+        if self.show:
+            sys.stdout.write("\rProgress: {:.2%} [{}]".format(0, name))
+            sys.stdout.flush()
+
+    def update_progress(self):
+        # Update progress
+        self.progress_complete += 1.00
+        if self.show:
+            sys.stdout.write("\rProgress: {:.2%} [{}]".format(self.progress_complete / self.progress_total, self.name))
+            sys.stdout.flush()
+        if (self.progress_complete == self.progress_total) and self.show:
+            print("")
 
 
 class Memory:
@@ -106,7 +134,8 @@ class Memory:
             if subspace_size == 0:
                 subspace = np.zeros((1, self.memory_size))
                 subspace_size = 1
-            self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights)
+            self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
+                                                   n_jobs=1)
             self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
 
@@ -366,15 +395,24 @@ if __name__ == "__main__":
     agent = Agent(occipital, hippocampus, action_space, 10000, 10000, reward_discount=0.999, k=50)
 
     epoch = 100
+
     epoch_rewards = []
-    model_times = []
-    act_times = []
-    learn_times = []
-    finish_times = []
+    epoch_model_times = []
+    epoch_act_times = []
+    epoch_learn_times = []
+    epoch_finish_times = []
+    epoch_run_through_times = []
+
     exploration = 0
+    prog = None
 
     for run_through in range(10000):
         rewards = 0
+        model_times = 0
+        act_times = 0
+        learn_times = 0
+
+        run_through_start = time.time()
 
         # Initialize environment
         s = env.reset()
@@ -392,16 +430,17 @@ if __name__ == "__main__":
             sc = s
 
             end = time.time()
-            model_times.append(end - start)
+            model_times += end - start
 
             start = time.time()
 
             # Likelihood of picking a random action
+            # exploration = 1 / (run_through + 1)
             exploration = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
             a, e = agent.Act(scene=sc, epsilon=exploration)
 
             end = time.time()
-            act_times.append(end - start)
+            act_times += end - start
 
             s, r, done, info = env.step(a)
 
@@ -413,7 +452,7 @@ if __name__ == "__main__":
             agent.Learn(sc, a, r, e)
 
             end = time.time()
-            learn_times.append(end - start)
+            learn_times += end - start
 
             # Break at end of run-through
             if done:
@@ -425,19 +464,35 @@ if __name__ == "__main__":
         agent.Finish()
 
         end = time.time()
-        finish_times.append(end - start)
+        epoch_finish_times.append(end - start)
 
         epoch_rewards.append(rewards)
+        epoch_model_times.append(model_times)
+        epoch_act_times.append(act_times)
+        epoch_learn_times.append(learn_times)
+
+        run_through_end = time.time()
+        epoch_run_through_times.append(run_through_end - run_through_start)
+
+        if prog is not None:
+            prog.update_progress()
+
         if not run_through % epoch:
-            print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
-            print("* {} memories stored".format(agent.global_memory.length))
-            print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, exploration))
-            print("* Average modeling time: {}".format(np.mean(model_times)))
-            print("* Average acting time: {}".format(np.mean(act_times)))
-            print("* Average learning time: {}".format(np.mean(learn_times)))
-            print("* Average finishing time: {}\n".format(np.mean(finish_times)))
+            if run_through > 0:
+                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
+                print("* {} memories stored".format(agent.global_memory.length))
+                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, exploration))
+                print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
+                print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
+                print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
+                print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
+                print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
             epoch_rewards = []
-            model_times = []
-            act_times = []
-            learn_times = []
-            finish_times = []
+            epoch_model_times = []
+            epoch_act_times = []
+            epoch_learn_times = []
+            epoch_finish_times = []
+            epoch_run_through_times = []
+
+            # Initiate progress
+            prog = Progress(0, epoch, "Epoch", True)
