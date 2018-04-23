@@ -370,16 +370,18 @@ class Felsenszwalb:
         # Might be good to not include 'previous' attribute
         return self.__dict__ == another.__dict__
 
-def EpochRun():
+
+def run_through_run():
+    # Environment
+    env = gym.make('CartPole-v0')
+
     # Visual model
     # occipital = Felsenszwalb(objects)
-    occipital = RandomProjection(64, None, True, True)
+    occipital = RandomProjection(STATE_SPACE, None, True, True)
     # occipital.state_space = state_space
 
     # Agent
-    agent = Agent(occipital, hippocampus, action_space, local_memory_horizon=1000, gamma=0.999, epsilon=1, k=K)
-
-    # run_through_start = time.time()
+    agent = Agent(occipital, hippocampus, ACTION_SPACE, local_memory_horizon=1000, gamma=0.999, epsilon=1, k=K)
 
     # Initialize environment
     s = env.reset()
@@ -390,34 +392,34 @@ def EpochRun():
         # if run_through > 400:
         #     env.render()
 
-        start = time.time()
+        # start = time.time()
 
         # Get scene from model
-        sc = agent.Model(s)
-        # sc = s
+        # sc = agent.Model(s)
+        sc = s
 
-        end = time.time()
+        # end = time.time()
         # model_times += end - start
 
-        start = time.time()
+        # start = time.time()
 
         # Likelihood of picking a random action
         agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
         a, e = agent.Act(scene=sc)
 
-        end = time.time()
+        # end = time.time()
         # act_times += end - start
 
         s, r, done, info = env.step(a)
 
         # rewards += r
 
-        start = time.time()
+        # start = time.time()
 
         # Learn from the reward
         agent.Learn(sc, a, r, e)
 
-        end = time.time()
+        # end = time.time()
         # learn_times += end - start
 
         # Break at end of run-through
@@ -436,21 +438,21 @@ if __name__ == "__main__":
     VALUE_INDEX = -3
     EXPECTED_INDEX = -2
     TD_ERROR_INDEX = -1
-    NUM_THREADS = 4
+
+    NUM_THREADS = 2
+
     K = 50
-
+    STATE_SPACE = 64
 
     # Environment
-    # env = gym.make('CartPole-v0')
+    init_env = gym.make('CartPole-v0')
+    ACTION_SPACE = np.arange(init_env.action_space.n)
+    STATE_SPACE = init_env.observation_space.shape[0]
+
+    # Environment
+    # env = gym.make('Pong-v0')
     # action_space = np.arange(env.action_space.n)
-    # objects = None
-    # properties = None
-    # state_space = env.observation_space.shape[0]
-
-    # Environment
-    env = gym.make('Pong-v0')
-    action_space = np.arange(env.action_space.n)
-    objects = 12
+    # objects = 12
 
     # Environment
     # env = gym.make('SpaceInvaders-v0')
@@ -459,68 +461,71 @@ if __name__ == "__main__":
 
     # Global memory
     global_memory_horizon = 1000000
-    hippocampus = Memory(64 + NUM_ATTRIBUTES, global_memory_horizon)
+    hippocampus = Memory(STATE_SPACE + NUM_ATTRIBUTES, global_memory_horizon)
     gm_lock = Lock()
 
     epoch = 100
 
     # Initialize metric variables for measuring performance
-    epoch_rewards = []
-    epoch_model_times = []
-    epoch_act_times = []
-    epoch_learn_times = []
-    epoch_finish_times = []
+    # epoch_rewards = []
+    # epoch_model_times = []
+    # epoch_act_times = []
+    # epoch_learn_times = []
+    # epoch_finish_times = []
     epoch_run_through_times = []
     prog = None
 
     for run_through in range(10000):
-        rewards = 0
-        model_times = 0
-        act_times = 0
-        learn_times = 0
+        # rewards = 0
+        # model_times = 0
+        # act_times = 0
+        # learn_times = 0
+
+        run_through_start = time.time()
 
         threads = []
         for i in range(NUM_THREADS):
-            threads.append(Thread(target=EpochRun))
+            threads.append(Thread(target=run_through_run))
             threads[-1].start()
 
-        start = time.time()
-        # JOIN GOES HERE
+        # start = time.time()
+
+        # Join
         for thread in threads:
             thread.join()
 
         # Build kNN tree, etc.
-        hippocampus.Learn(K, action_space)
+        hippocampus.Learn(K, ACTION_SPACE)
 
-        end = time.time()
-        epoch_finish_times.append(end - start)
-
-        epoch_rewards.append(rewards)
-        epoch_model_times.append(model_times)
-        epoch_act_times.append(act_times)
-        epoch_learn_times.append(learn_times)
+        # end = time.time()
+        # epoch_finish_times.append(end - start)
+        #
+        # epoch_rewards.append(rewards)
+        # epoch_model_times.append(model_times)
+        # epoch_act_times.append(act_times)
+        # epoch_learn_times.append(learn_times)
 
         run_through_end = time.time()
-        # epoch_run_through_times.append(run_through_end - run_through_start)
+        epoch_run_through_times.append(run_through_end - run_through_start)
 
         if prog is not None:
             prog.update_progress()
 
         if not run_through % epoch:
             if run_through > 0:
-                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
-                print("* {} memories stored".format(agent.global_memory.length))
-                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, agent.epsilon))
-                print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
-                print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
-                print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
-                print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
+                # print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
+                print("* {} memories stored".format(hippocampus.length))
+                # print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, agent.epsilon))
+                # print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
+                # print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
+                # print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
+                # print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
                 print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
-            epoch_rewards = []
-            epoch_model_times = []
-            epoch_act_times = []
-            epoch_learn_times = []
-            epoch_finish_times = []
+            # epoch_rewards = []
+            # epoch_model_times = []
+            # epoch_act_times = []
+            # epoch_learn_times = []
+            # epoch_finish_times = []
             epoch_run_through_times = []
 
             # Initiate progress
