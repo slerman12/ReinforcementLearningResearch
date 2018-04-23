@@ -76,7 +76,7 @@ class Memory:
         self.remove = np.array([])
 
     # Merge and clear
-    def Learn(self, m, k, actions, reward_discount):
+    def Merge(self, m, reward_discount):
         # Dynamic programming using Bellman equation to computes values (temporally discounted rewards) in linear time
         m.memory[0, VALUE_INDEX] = m.memory[0, REWARD_INDEX]
         for i in range(1, m.length):
@@ -86,6 +86,8 @@ class Memory:
             m.memory[i, TD_ERROR_INDEX] = bellman_RHS - bellman_LHS
 
         duplicates = []
+
+        # Begin lock
 
         # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
         for mem in m.memory:
@@ -118,6 +120,10 @@ class Memory:
             self.memory = self.memory[:-(self.length - self.memory_horizon), :]
             self.length = self.memory_horizon
 
+        # End lock
+
+    # Merge and clear
+    def Learn(self, k, actions):
         # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
         def duplicate_weights(dist):
             for i, point_dist in enumerate(dist):
@@ -173,23 +179,28 @@ class Agent:
     def Learn(self, scene, action, reward, expected):
         self.local_memory.Add(scene, action, reward, expected)
 
-    def Finish(self):
-        self.global_memory.Learn(self.local_memory, self.k, self.actions, self.reward_discount)
+    def Finish_Merge(self):
+        self.global_memory.Merge(self.local_memory, self.reward_discount)
         self.local_memory.Reset()
+
+    def Finish_Learn(self):
+        self.global_memory.Learn(self.k, self.actions)
 
 
 # Lower dimension projection of state
 class RandomProjection:
-    def __init__(self, dimension, size=None):
+    def __init__(self, dimension, size=None, greyscale=False, flatten=False):
         self.dimension = dimension
         self.size = size
+        self.greyscale = greyscale
+        self.flatten = flatten
 
         self.projection = None
         self.state_space = self.dimension
 
-    def Update(self, state, greyscale=False, flatten=False):
+    def Update(self, state):
         # Greyscale
-        if greyscale:
+        if self.greyscale:
             state = np.dot(state[..., :3], [0.299, 0.587, 0.114])
 
         # Image resize
@@ -197,7 +208,7 @@ class RandomProjection:
             state = cv2.resize(state, dsize=self.size)
 
         # Lower dimension projection
-        if flatten:
+        if self.flatten:
             state = state.flatten()
 
         if self.projection is None:
@@ -206,7 +217,7 @@ class RandomProjection:
         return self.projection.transform([state])[0]
 
 
-# Felsenszwalb’s efficient graph based image segmentation w/ trajectories
+# Felsenszwalb's efficient graph based image segmentation w/ trajectories
 class Felsenszwalb:
     class Object:
         index = None
@@ -367,16 +378,16 @@ if __name__ == "__main__":
     TD_ERROR_INDEX = -1
 
     # Environment
-    env = gym.make('CartPole-v0')
-    action_space = np.arange(env.action_space.n)
-    objects = None
-    properties = None
-    state_space = env.observation_space.shape[0]
+    # env = gym.make('CartPole-v0')
+    # action_space = np.arange(env.action_space.n)
+    # objects = None
+    # properties = None
+    # state_space = env.observation_space.shape[0]
 
     # Environment
-    # env = gym.make('Pong-v0')
-    # action_space = np.arange(env.action_space.n)
-    # objects = 12
+    env = gym.make('Pong-v0')
+    action_space = np.arange(env.action_space.n)
+    objects = 12
 
     # Environment
     # env = gym.make('SpaceInvaders-v0')
@@ -384,8 +395,9 @@ if __name__ == "__main__":
     # objects = 160
 
     # Visual model
-    occipital = Felsenszwalb(objects)
-    occipital.state_space = state_space
+    # occipital = Felsenszwalb(objects)
+    occipital = RandomProjection(64, None, True, True)
+    # occipital.state_space = state_space
 
     # Global memory
     global_memory_horizon = 1000000
@@ -425,8 +437,8 @@ if __name__ == "__main__":
             start = time.time()
 
             # Get scene from model
-            # sc = agent.Model(s)
-            sc = s
+            sc = agent.Model(s)
+            # sc = s
 
             end = time.time()
             model_times += end - start
@@ -458,8 +470,13 @@ if __name__ == "__main__":
 
         start = time.time()
 
-        # Dump run-through's memories into global memory
-        agent.Finish()
+        # Update temporally discounted rewards and dump run-through's memories into global memory
+        agent.Finish_Merge()
+
+        # JOIN GOES HERE
+
+        # Build kNN tree, etc.
+        agent.Finish_Learn()
 
         end = time.time()
         epoch_finish_times.append(end - start)
