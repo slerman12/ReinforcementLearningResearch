@@ -11,6 +11,7 @@ from skimage.measure import regionprops
 from skimage.segmentation import felzenszwalb
 from skimage.segmentation import mark_boundaries
 import matplotlib.pyplot as plt
+from threading import Lock, Thread
 
 
 # Display progress in console
@@ -88,6 +89,7 @@ class Memory:
         duplicates = []
 
         # Begin lock
+        gm_lock.acquire()
 
         # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
         for mem in m.memory:
@@ -121,6 +123,7 @@ class Memory:
             self.length = self.memory_horizon
 
         # End lock
+        gm_lock.release()
 
     # Merge and clear
     def Learn(self, k, actions):
@@ -367,6 +370,63 @@ class Felsenszwalb:
         # Might be good to not include 'previous' attribute
         return self.__dict__ == another.__dict__
 
+def EpochRun():
+    # Visual model
+    # occipital = Felsenszwalb(objects)
+    occipital = RandomProjection(64, None, True, True)
+    # occipital.state_space = state_space
+
+    # Agent
+    agent = Agent(occipital, hippocampus, action_space, local_memory_horizon=1000, gamma=0.999, epsilon=1, k=K)
+
+    # run_through_start = time.time()
+
+    # Initialize environment
+    s = env.reset()
+
+    for t in range(250):
+
+        # Display environment
+        # if run_through > 400:
+        #     env.render()
+
+        start = time.time()
+
+        # Get scene from model
+        sc = agent.Model(s)
+        # sc = s
+
+        end = time.time()
+        # model_times += end - start
+
+        start = time.time()
+
+        # Likelihood of picking a random action
+        agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
+        a, e = agent.Act(scene=sc)
+
+        end = time.time()
+        # act_times += end - start
+
+        s, r, done, info = env.step(a)
+
+        # rewards += r
+
+        start = time.time()
+
+        # Learn from the reward
+        agent.Learn(sc, a, r, e)
+
+        end = time.time()
+        # learn_times += end - start
+
+        # Break at end of run-through
+        if done:
+            break
+
+    # Update temporally discounted rewards and dump run-through's memories into global memory
+    agent.Finish_Merge()
+
 
 # Main method
 if __name__ == "__main__":
@@ -376,6 +436,9 @@ if __name__ == "__main__":
     VALUE_INDEX = -3
     EXPECTED_INDEX = -2
     TD_ERROR_INDEX = -1
+    NUM_THREADS = 4
+    K = 50
+
 
     # Environment
     # env = gym.make('CartPole-v0')
@@ -394,17 +457,10 @@ if __name__ == "__main__":
     # action_space = np.arange(env.action_space.n)
     # objects = 160
 
-    # Visual model
-    # occipital = Felsenszwalb(objects)
-    occipital = RandomProjection(64, None, True, True)
-    # occipital.state_space = state_space
-
     # Global memory
     global_memory_horizon = 1000000
-    hippocampus = Memory(occipital.state_space + NUM_ATTRIBUTES, global_memory_horizon)
-
-    # Agent
-    agent = Agent(occipital, hippocampus, action_space, local_memory_horizon=1000, gamma=0.999, epsilon=1, k=50)
+    hippocampus = Memory(64 + NUM_ATTRIBUTES, global_memory_horizon)
+    gm_lock = Lock()
 
     epoch = 100
 
@@ -423,60 +479,18 @@ if __name__ == "__main__":
         act_times = 0
         learn_times = 0
 
-        run_through_start = time.time()
-
-        # Initialize environment
-        s = env.reset()
-
-        for t in range(250):
-
-            # Display environment
-            # if run_through > 400:
-            #     env.render()
-
-            start = time.time()
-
-            # Get scene from model
-            sc = agent.Model(s)
-            # sc = s
-
-            end = time.time()
-            model_times += end - start
-
-            start = time.time()
-
-            # Likelihood of picking a random action
-            agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
-            a, e = agent.Act(scene=sc)
-
-            end = time.time()
-            act_times += end - start
-
-            s, r, done, info = env.step(a)
-
-            rewards += r
-
-            start = time.time()
-
-            # Learn from the reward
-            agent.Learn(sc, a, r, e)
-
-            end = time.time()
-            learn_times += end - start
-
-            # Break at end of run-through
-            if done:
-                break
+        threads = []
+        for i in range(NUM_THREADS):
+            threads.append(Thread(target=EpochRun))
+            threads[-1].start()
 
         start = time.time()
-
-        # Update temporally discounted rewards and dump run-through's memories into global memory
-        agent.Finish_Merge()
-
         # JOIN GOES HERE
+        for thread in threads:
+            thread.join()
 
         # Build kNN tree, etc.
-        agent.Finish_Learn()
+        hippocampus.Learn(K, action_space)
 
         end = time.time()
         epoch_finish_times.append(end - start)
@@ -487,7 +501,7 @@ if __name__ == "__main__":
         epoch_learn_times.append(learn_times)
 
         run_through_end = time.time()
-        epoch_run_through_times.append(run_through_end - run_through_start)
+        # epoch_run_through_times.append(run_through_end - run_through_start)
 
         if prog is not None:
             prog.update_progress()
