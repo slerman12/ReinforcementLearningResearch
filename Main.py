@@ -51,7 +51,6 @@ class Memory:
         self.memory_horizon = memory_horizon
 
         self.memory = np.zeros((1, self.memory_size))
-        print(memory_size)
 
     def Add(self, scene, action, reward, expected):
         attributes = np.zeros(NUM_ATTRIBUTES)
@@ -383,16 +382,16 @@ if __name__ == "__main__":
     TD_ERROR_INDEX = -1
 
     # Environment
-    # env = gym.make('CartPole-v0')
-    # action_space = np.arange(env.action_space.n)
-    # objects = None
-    # properties = None
-    # state_space = env.observation_space.shape[0]
+    env = gym.make('CartPole-v0')
+    action_space = np.arange(env.action_space.n)
+    objects = None
+    properties = None
+    state_space = env.observation_space.shape[0]
 
     # Environment
-    env = gym.make('Pong-v0')
-    action_space = np.arange(env.action_space.n)
-    objects = 12
+    # env = gym.make('Pong-v0')
+    # action_space = np.arange(env.action_space.n)
+    # objects = 12
 
     # Environment
     # env = gym.make('SpaceInvaders-v0')
@@ -402,7 +401,7 @@ if __name__ == "__main__":
     # Visual model
     occipital = Felsenszwalb(objects)
     # occipital = RandomProjection(64, None, True, True)
-    # occipital.state_space = state_space
+    occipital.state_space = state_space
 
     # Global memory
     global_memory_horizon = 1000000
@@ -442,8 +441,8 @@ if __name__ == "__main__":
             start = time.time()
 
             # Get scene from model
-            sc = agent.Model(s)
-            # sc = s
+            # sc = agent.Model(s)
+            sc = s
 
             end = time.time()
             model_times += end - start
