@@ -10,9 +10,10 @@ from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
 from skimage.segmentation import felzenszwalb
 from skimage.segmentation import mark_boundaries
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 import multiprocessing
+from itertools import product
 
 
 # Display progress in console
@@ -108,7 +109,7 @@ class Memory:
 
         pool = multiprocessing.Pool(multiprocessing.cpu_count())
 
-        pool.map(process_duplicates, [(mem, duplicates) for mem in m.memory])
+        pool.starmap(process_duplicates, product([mem for mem in m.memory], duplicates))
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
@@ -369,16 +370,16 @@ class Felsenszwalb:
 
         return scene
 
-    def Show(self):
-        if self.state is not None and self.segments is not None:
-            # Show segments
-            figure = plt.figure("Segments")
-            ax = figure.add_subplot(1, 1, 1)
-            ax.imshow(mark_boundaries(self.state, self.segments))
-            plt.axis("off")
-
-            # Plot
-            plt.show()
+#    def Show(self):
+#        if self.state is not None and self.segments is not None:
+#            # Show segments
+#            figure = plt.figure("Segments")
+#            ax = figure.add_subplot(1, 1, 1)
+#            ax.imshow(mark_boundaries(self.state, self.segments))
+#            plt.axis("off")
+#
+#            # Plot
+#            plt.show()
 
     def __eq__(self, another):
         # Might be good to not include 'previous' attribute
