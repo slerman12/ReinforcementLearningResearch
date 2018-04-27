@@ -1,3 +1,6 @@
+#commented the matplotlib import and Show method because of cycle machine
+#parallizing the process_scene() doesn't seem to be beneficial at the first look
+
 from __future__ import division
 import numpy as np
 import cv2
@@ -107,9 +110,9 @@ class Memory:
             except IndexError:
                 pass
 
-        pool = multiprocessing.Pool(multiprocessing.cpu_count())
-
-        pool.starmap(process_duplicates, product([mem for mem in m.memory], duplicates))
+        #pool = multiprocessing.Pool(multiprocessing.cpu_count())
+        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+            pool.starmap(process_duplicates, product([mem for mem in m.memory], duplicates))
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
@@ -173,9 +176,17 @@ class Agent:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # Get expected reward for each action
+#        def process_actions(act, expctd):
+#            exp = self.global_memory.knn[act].predict([scene])[0] if self.global_memory.length > 0 else 0
+#            expctd.append(exp)
+#
+#        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+#            pool.starmap(process_actions, product([action for action in self.actions], expected))
+
         for action in self.actions:
             exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
             expected.append(exp)
+
 
         weights = np.array(expected)
 
@@ -278,12 +289,16 @@ class Felsenszwalb:
 
             # HI MOHSEN THIS IS STUFF HELLO
 
-            for index in range(min(object_capacity, self.length)):
-                scene[index, 0] = self.objects[index].area
-                scene[index, 1] = self.objects[index].x
-                scene[index, 2] = self.objects[index].y
-                scene[index, 3] = self.objects[index].trajectory_x
-                scene[index, 4] = self.objects[index].trajectory_y
+            #for index in range(min(object_capacity, self.length)):
+            def process_scene(sc):
+                sc[index, 0] = self.objects[index].area
+                sc[index, 1] = self.objects[index].x
+                sc[index, 2] = self.objects[index].y
+                sc[index, 3] = self.objects[index].trajectory_x
+                sc[index, 4] = self.objects[index].trajectory_y
+
+            with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+                pool.starmap(process_scene, product([index for index in range(min(object_capacity, self.length))], scene))
 
             return scene.flatten()
 
