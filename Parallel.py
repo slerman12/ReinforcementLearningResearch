@@ -15,6 +15,7 @@ from skimage.segmentation import felzenszwalb
 from skimage.segmentation import mark_boundaries
 #import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
+from joblib.pool import has_shareable_memory
 import multiprocessing
 from multiprocessing import Process, Value, Array
 from itertools import product
@@ -83,8 +84,7 @@ class Memory:
         self.length = 1
         self.remove = np.array([])
 
-    def process_duplicates(self, mem):
-        dup = []
+    def process_duplicates(self, mem, dup):
         #print("entered process_duplicates()")
         try:
             # This in particular is likely the cause
@@ -94,11 +94,13 @@ class Memory:
             if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
                 mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
                 mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
-
+            #return duplicate
             dup.append(duplicate)
+
         except IndexError:
             pass
-        return dup
+
+        return 0
 
 
     # Merge and clear
@@ -117,11 +119,13 @@ class Memory:
 
         #pool = multiprocessing.Pool(multiprocessing.cpu_count())
         #process_duplicates_input = {mem_in: [mem for mem in m.memory], duplicates}
-        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-            duplicates = [pool.apply(self.process_duplicates, args=(mem,)) for mem in m.memory]
-            #duplicates = [pool.map(self.process_duplicates, mem for mem in m.memory)]
+        #with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+        #    duplicates = [pool.map(self.process_duplicates, (mem for mem in m.memory))]
+        #pool = multiprocessing.Pool(processes=4)
+        #duplicates = [pool.apply(self.process_duplicates, args=(mem,)) for mem in m.memory]
         #pool = multiprocessing.Pool(processes=4)
         #pool.apply(self.process_duplicates, args=(mem, duplicates)) [for mem in m.memory]
+        Parallel(n_jobs=multiprocessing.cpu_count(), max_nbytes=1e6, backend="threading")(delayed(has_shareable_memory)(self.process_duplicates(mem, duplicates)) for mem in m.memory)
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
@@ -298,16 +302,15 @@ class Felsenszwalb:
 
             # HI MOHSEN THIS IS STUFF HELLO
 
-            #for index in range(min(object_capacity, self.length)):
-            def process_scene(sc):
-                sc[index, 0] = self.objects[index].area
-                sc[index, 1] = self.objects[index].x
-                sc[index, 2] = self.objects[index].y
-                sc[index, 3] = self.objects[index].trajectory_x
-                sc[index, 4] = self.objects[index].trajectory_y
+            for index in range(min(object_capacity, self.length)):
+                scene[index, 0] = self.objects[index].area
+                scene[index, 1] = self.objects[index].x
+                scene[index, 2] = self.objects[index].y
+                scene[index, 3] = self.objects[index].trajectory_x
+                scene[index, 4] = self.objects[index].trajectory_y
 
-            with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-                pool.starmap(process_scene, product([index for index in range(min(object_capacity, self.length))], scene))
+            #with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+            #    pool.starmap(process_scene, product([index for index in range(min(object_capacity, self.length))], scene))
 
             return scene.flatten()
 
