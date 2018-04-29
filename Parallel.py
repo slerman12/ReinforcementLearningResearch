@@ -207,7 +207,7 @@ def parallel_kd_tree(action, k):
 
 
 def parallel_expected_values(action, scene):
-    print(threading.current_thread())
+    # print(threading.current_thread())
     exp = hippocampus.knn[action].predict([scene])[0] if hippocampus.length > 0 else 0
     return exp
 
