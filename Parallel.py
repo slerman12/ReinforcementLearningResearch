@@ -99,21 +99,21 @@ class Memory:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
-        for mem in m.memory:
-            try:
-                # This in particular is likely the cause
-                duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
-                self.duplicates += 1
+        # for mem in m.memory:
+        #     try:
+        #         # This in particular is likely the cause
+        #         duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+        #         self.duplicates += 1
+        #
+        #         if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
+        #             mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
+        #             mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
+        #
+        #         duplicates.append(duplicate)
+        #     except IndexError:
+        #         pass
 
-                if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
-                    mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
-                    mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
-
-                duplicates.append(duplicate)
-            except IndexError:
-                pass
-
-        def process_duplicates(mem, dup):
+        def parallel_duplicates(mem, dup):
             # print("entered process_duplicates()")
             try:
                 # This in particular is likely the cause
@@ -131,16 +131,8 @@ class Memory:
 
             return 0
 
-        #pool = multiprocessing.Pool(multiprocessing.cpu_count())
-        #process_duplicates_input = {mem_in: [mem for mem in m.memory], duplicates}
-        #with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-        #    duplicates = [pool.map(self.process_duplicates, (mem for mem in m.memory))]
-        #pool = multiprocessing.Pool(processes=4)
-        #duplicates = [pool.apply(self.process_duplicates, args=(mem,)) for mem in m.memory]
-        #pool = multiprocessing.Pool(processes=4)
-        #pool.apply(self.process_duplicates, args=(mem, duplicates)) [for mem in m.memory]
-        # Parallel(n_jobs=multiprocessing.cpu_count(), backend="threading")(delayed(process_duplicates)(mem, duplicates) for mem in m.memory)
-        # Parallel(n_jobs=multiprocessing.cpu_count(), backend="threading")(delayed(has_shareable_memory)(process_duplicates(mem, duplicates)) for mem in m.memory)
+        # Call parallel_distance_weights with worker pool
+        parallel(delayed(has_shareable_memory)(parallel_duplicates(mem, duplicates)) for mem in m.memory)
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
@@ -163,15 +155,25 @@ class Memory:
     def Learn(self, k, actions):
         # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
         def duplicate_weights(dist):
-            def parallel_distance_weights(i, point_dist):
+            for i, point_dist in enumerate(dist):
                 if 0. in point_dist:
                     dist[i] = point_dist == 0.
                 else:
                     dist[i] = 1.
-
-            # Call parallel_kd_tree with worker pool
-            parallel(delayed(has_shareable_memory)(parallel_distance_weights(i, point_dist)) for i, point_dist in enumerate(dist))
             return dist
+
+        # TODO: This would improve speed if we figured out how to use new threads inside of a thread
+        # # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
+        # def duplicate_weights(dist):
+        #     def parallel_distance_weights(i, point_dist):
+        #         if 0. in point_dist:
+        #             dist[i] = point_dist == 0.
+        #         else:
+        #             dist[i] = 1.
+        #
+        #     # Call parallel_distance_weights with worker pool
+        #     parallel(delayed(has_shareable_memory)(parallel_distance_weights(i, point_dist)) for i, point_dist in enumerate(dist))
+        #     return dist
 
         # This is  slow -- bottleneck
         # for action in actions:
@@ -221,12 +223,12 @@ class Agent:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # Get expected reward for each action
-        #        def process_actions(act, expctd):
-        #            exp = self.global_memory.knn[act].predict([scene])[0] if self.global_memory.length > 0 else 0
-        #            expctd.append(exp)
-        #
-        #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-        #            pool.starmap(process_actions, product([action for action in self.actions], expected))
+#        def process_actions(act, expctd):
+#            exp = self.global_memory.knn[act].predict([scene])[0] if self.global_memory.length > 0 else 0
+#            expctd.append(exp)
+#
+#        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+#            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
         for action in self.actions:
             exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
@@ -314,7 +316,7 @@ class Felsenszwalb:
                 self.array = np.ndarray((1, 5), buffer=np.array([o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]))
             else:
                 self.array = np.append(self.array, np.array([[o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]]),
-                                       axis=0)
+                        axis=0)
 
                 def forget(self):
                     self.previous = None
@@ -429,16 +431,16 @@ class Felsenszwalb:
 
         return scene
 
-    #    def Show(self):
-    #        if self.state is not None and self.segments is not None:
-    #            # Show segments
-    #            figure = plt.figure("Segments")
-    #            ax = figure.add_subplot(1, 1, 1)
-    #            ax.imshow(mark_boundaries(self.state, self.segments))
-    #            plt.axis("off")
-    #
-    #            # Plot
-    #            plt.show()
+#    def Show(self):
+#        if self.state is not None and self.segments is not None:
+#            # Show segments
+#            figure = plt.figure("Segments")
+#            ax = figure.add_subplot(1, 1, 1)
+#            ax.imshow(mark_boundaries(self.state, self.segments))
+#            plt.axis("off")
+#
+#            # Plot
+#            plt.show()
 
     def __eq__(self, another):
         # Might be good to not include 'previous' attribute
