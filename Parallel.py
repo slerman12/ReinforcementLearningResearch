@@ -12,13 +12,10 @@ from sklearn import random_projection
 from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
 from skimage.segmentation import felzenszwalb
-from skimage.segmentation import mark_boundaries
-#import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 from joblib.pool import has_shareable_memory
 import multiprocessing
-from multiprocessing import Process, Value, Array
-from itertools import product
 
 
 # Display progress in console
@@ -152,16 +149,29 @@ class Memory:
             self.memory = self.memory[:-(self.length - self.memory_horizon), :]
             self.length = self.memory_horizon
 
+    # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
+    def duplicate_weights(self, dist):
+        for i, point_dist in enumerate(dist):
+            if 0. in point_dist:
+                dist[i] = point_dist == 0.
+            else:
+                dist[i] = 1.
+        return dist
+
+    # Parallelize KD tree construction across actions
+    def parallel_kd_tree(self, action, k):
+        subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
+        subspace_size = subspace.shape[0]
+        if subspace_size == 0:
+            subspace = np.zeros((1, self.memory_size))
+            subspace_size = 1
+        self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=self.duplicate_weights,
+                                               n_jobs=1)
+        self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+
     # Merge and clear
     def Learn(self, k, actions):
-        # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
-        def duplicate_weights(dist):
-            for i, point_dist in enumerate(dist):
-                if 0. in point_dist:
-                    dist[i] = point_dist == 0.
-                else:
-                    dist[i] = 1.
-            return dist
+
 
         # TODO: This would improve speed if we figured out how to use new threads inside of a thread
         # # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
@@ -187,19 +197,8 @@ class Memory:
         #             n_jobs=1)
         #     self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
-        # Parallelize KD tree construction across actions
-        def parallel_kd_tree(action):
-            subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
-            subspace_size = subspace.shape[0]
-            if subspace_size == 0:
-                subspace = np.zeros((1, self.memory_size))
-                subspace_size = 1
-            self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
-                                                   n_jobs=1)
-            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
-
         # Call parallel_kd_tree with worker pool
-        parallel(delayed(has_shareable_memory)(parallel_kd_tree(action)) for action in actions)
+        parallel(delayed(self.parallel_kd_tree)(action, k) for action in actions)
 
 
 class Agent:
@@ -217,6 +216,10 @@ class Agent:
     def Model(self, state):
         return self.model.Update(state)
 
+    def parallel_expected_values(self, action, scene):
+        exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+        return exp
+
     def Act(self, scene):
         # Initialize probabilities
         expected = []
@@ -224,23 +227,20 @@ class Agent:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # Get expected reward for each action
-#        def process_actions(act, expctd):
-#            exp = self.global_memory.knn[act].predict([scene])[0] if self.global_memory.length > 0 else 0
-#            expctd.append(exp)
-#
-#        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-#            pool.starmap(process_actions, product([action for action in self.actions], expected))
+        #        def process_actions(act, expctd):
+        #            exp = self.global_memory.knn[act].predict([scene])[0] if self.global_memory.length > 0 else 0
+        #            expctd.append(exp)
+        #
+        #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+        #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
         # for action in self.actions:
         #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
         #     expected.append(exp)
 
-        def parallel_expected_values(action):
-            return self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-
         # Call parallel_expected-values with worker pool
-        expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in action_space)
-
+        # expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in self.actions)
+        expected = parallel(delayed(self.parallel_expected_values)(action, scene) for action in self.actions)
 
         weights = np.array(expected)
 
@@ -323,7 +323,7 @@ class Felsenszwalb:
                 self.array = np.ndarray((1, 5), buffer=np.array([o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]))
             else:
                 self.array = np.append(self.array, np.array([[o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]]),
-                        axis=0)
+                                       axis=0)
 
                 def forget(self):
                     self.previous = None
@@ -438,16 +438,16 @@ class Felsenszwalb:
 
         return scene
 
-#    def Show(self):
-#        if self.state is not None and self.segments is not None:
-#            # Show segments
-#            figure = plt.figure("Segments")
-#            ax = figure.add_subplot(1, 1, 1)
-#            ax.imshow(mark_boundaries(self.state, self.segments))
-#            plt.axis("off")
-#
-#            # Plot
-#            plt.show()
+    #    def Show(self):
+    #        if self.state is not None and self.segments is not None:
+    #            # Show segments
+    #            figure = plt.figure("Segments")
+    #            ax = figure.add_subplot(1, 1, 1)
+    #            ax.imshow(mark_boundaries(self.state, self.segments))
+    #            plt.axis("off")
+    #
+    #            # Plot
+    #            plt.show()
 
     def __eq__(self, another):
         # Might be good to not include 'previous' attribute
