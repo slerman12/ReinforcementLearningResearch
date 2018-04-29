@@ -2,6 +2,9 @@
 # parallizing the process_scene() doesn't seem to be beneficial at the first look
 
 from __future__ import division
+
+import threading
+
 import numpy as np
 import cv2
 import gym
@@ -186,6 +189,7 @@ class Memory:
 
         # Parallelize KD tree construction across actions
         def parallel_kd_tree(action):
+            print(threading.get_ident())
             subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
             subspace_size = subspace.shape[0]
             if subspace_size == 0:
