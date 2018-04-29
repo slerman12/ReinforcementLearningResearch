@@ -513,102 +513,103 @@ if __name__ == "__main__":
     prog = None
 
     # Initialize worker pool
-    with Pool(processes=action_space.size) as parallel:
-        for run_through in range(10000):
-            rewards = 0
-            model_times = 0
-            act_times = 0
-            learn_times = 0
+    parallel = Pool(processes=action_space.size)
 
-            run_through_start = time.time()
+    for run_through in range(10000):
+        rewards = 0
+        model_times = 0
+        act_times = 0
+        learn_times = 0
 
-            # Initialize environment
-            s = env.reset()
+        run_through_start = time.time()
 
-            for t in range(250):
+        # Initialize environment
+        s = env.reset()
 
-                # Display environment
-                # if run_through > 400:
-                #     env.render()
+        for t in range(250):
 
-                start = time.time()
-
-                # Get scene from model
-                # sc = agent.Model(s)
-                sc = s
-
-                end = time.time()
-                model_times += end - start
-
-                start = time.time()
-
-                # Likelihood of picking a random action
-                agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
-                a, e = agent.Act(scene=sc)
-
-                end = time.time()
-                act_times += end - start
-
-                s, r, done, info = env.step(a)
-
-                rewards += r
-
-                start = time.time()
-
-                # Learn from the reward
-                agent.Learn(sc, a, r, e)
-
-                end = time.time()
-                learn_times += end - start
-
-                # Break at end of run-through
-                if done:
-                    break
+            # Display environment
+            # if run_through > 400:
+            #     env.render()
 
             start = time.time()
 
-            # Update temporally discounted rewards and dump run-through's memories into global memory
-            agent.Finish_Merge()
-
-            # Build kNN tree, etc.
-            agent.Finish_Learn()
+            # Get scene from model
+            # sc = agent.Model(s)
+            sc = s
 
             end = time.time()
-            epoch_finish_times.append(end - start)
+            model_times += end - start
 
-            epoch_rewards.append(rewards)
-            epoch_model_times.append(model_times)
-            epoch_act_times.append(act_times)
-            epoch_learn_times.append(learn_times)
+            start = time.time()
 
-            run_through_end = time.time()
-            epoch_run_through_times.append(run_through_end - run_through_start)
+            # Likelihood of picking a random action
+            agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
+            a, e = agent.Act(scene=sc)
 
-            if prog is not None:
-                prog.update_progress()
+            end = time.time()
+            act_times += end - start
 
-            if not run_through % epoch:
-                if run_through > 0:
-                    print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch,
-                                                                                    np.mean(epoch_rewards)))
-                    print("* {} memories stored".format(agent.global_memory.length))
-                    print("* {} duplicates".format(agent.global_memory.duplicates))
-                    print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount,
-                                                                            agent.epsilon))
-                    print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
-                    print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
-                    print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
-                    print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
-                    print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
-                epoch_rewards = []
-                epoch_model_times = []
-                epoch_act_times = []
-                epoch_learn_times = []
-                epoch_finish_times = []
-                epoch_run_through_times = []
+            s, r, done, info = env.step(a)
 
-                # Initiate progress
-                prog = Progress(0, epoch, "Epoch", True)
+            rewards += r
 
-    parallel.join()
-    parallel.close()
+            start = time.time()
+
+            # Learn from the reward
+            agent.Learn(sc, a, r, e)
+
+            end = time.time()
+            learn_times += end - start
+
+            # Break at end of run-through
+            if done:
+                break
+
+        start = time.time()
+
+        # Update temporally discounted rewards and dump run-through's memories into global memory
+        agent.Finish_Merge()
+
+        # Build kNN tree, etc.
+        agent.Finish_Learn()
+
+        end = time.time()
+        epoch_finish_times.append(end - start)
+
+        epoch_rewards.append(rewards)
+        epoch_model_times.append(model_times)
+        epoch_act_times.append(act_times)
+        epoch_learn_times.append(learn_times)
+
+        run_through_end = time.time()
+        epoch_run_through_times.append(run_through_end - run_through_start)
+
+        if prog is not None:
+            prog.update_progress()
+
+        if not run_through % epoch:
+            if run_through > 0:
+                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch,
+                                                                                np.mean(epoch_rewards)))
+                print("* {} memories stored".format(agent.global_memory.length))
+                print("* {} duplicates".format(agent.global_memory.duplicates))
+                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount,
+                                                                        agent.epsilon))
+                print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
+                print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
+                print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
+                print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
+                print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
+            epoch_rewards = []
+            epoch_model_times = []
+            epoch_act_times = []
+            epoch_learn_times = []
+            epoch_finish_times = []
+            epoch_run_through_times = []
+
+            # Initiate progress
+            prog = Progress(0, epoch, "Epoch", True)
+
+parallel.join()
+parallel.close()
