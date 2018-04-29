@@ -197,7 +197,6 @@ def duplicate_weights(dist):
 # Parallelize KD tree construction across actions
 def parallel_kd_tree(action, k):
     # print(threading.get_ident())
-    global hippocampus
     subspace = hippocampus.memory[hippocampus.memory[:, ACTION_INDEX] == action]
     subspace_size = subspace.shape[0]
     if subspace_size == 0:
@@ -209,7 +208,6 @@ def parallel_kd_tree(action, k):
 
 def parallel_expected_values(action, scene):
     # print(threading.current_thread())
-    global hippocampus
     exp = hippocampus.knn[action].predict([scene])[0] if hippocampus.length > 0 else 0
     return exp
 
@@ -514,7 +512,7 @@ if __name__ == "__main__":
     prog = None
 
     # Initialize worker pool
-    with Parallel(n_jobs=multiprocessing.cpu_count(), backend="threading") as parallel:
+    with Parallel(n_jobs=-1) as parallel:
         for run_through in range(10000):
             rewards = 0
             model_times = 0
