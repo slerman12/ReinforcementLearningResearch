@@ -99,22 +99,7 @@ class Memory:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
-        # for mem in m.memory:
-        #     try:
-        #         # This in particular is likely the cause
-        #         duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
-        #         self.duplicates += 1
-        #
-        #         if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
-        #             mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
-        #             mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
-        #
-        #         duplicates.append(duplicate)
-        #     except IndexError:
-        #         pass
-
-        def parallel_duplicates(mem, dup):
-            # print("entered process_duplicates()")
+        for mem in m.memory:
             try:
                 # This in particular is likely the cause
                 duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
@@ -123,16 +108,32 @@ class Memory:
                 if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
                     mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
                     mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
-                #return duplicate
-                dup.append(duplicate)
 
+                duplicates.append(duplicate)
             except IndexError:
                 pass
 
-            return 0
-
-        # Call parallel_distance_weights with worker pool
-        parallel(delayed(has_shareable_memory)(parallel_duplicates(mem, duplicates)) for mem in m.memory)
+        # TODO: either re-write this method or account for duplicates list and large memory allocation
+        # def parallel_duplicates(mem, dup):
+        #     # print("entered process_duplicates()")
+        #     try:
+        #         # This in particular is likely the cause
+        #         duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+        #         self.duplicates += 1
+        #
+        #         if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
+        #             mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
+        #             mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
+        #         #return duplicate
+        #         dup.append(duplicate)
+        #
+        #     except IndexError:
+        #         pass
+        #
+        #     return 0
+        #
+        # # Call parallel_distance_weights with worker pool
+        # parallel(delayed(has_shareable_memory)(parallel_duplicates(mem, duplicates)) for mem in m.memory)
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
@@ -230,9 +231,15 @@ class Agent:
 #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
 #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
-        for action in self.actions:
-            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-            expected.append(exp)
+        # for action in self.actions:
+        #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+        #     expected.append(exp)
+
+        def parallel_expected_values(action):
+            return self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+
+        # Call parallel_expected-values with worker pool
+        expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in action_space)
 
 
         weights = np.array(expected)
