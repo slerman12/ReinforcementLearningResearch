@@ -241,13 +241,13 @@ class Agent:
         #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
         #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
-        # for action in self.actions:
-        #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-        #     expected.append(exp)
+        for action in self.actions:
+            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+            expected.append(exp)
 
         # Call parallel_expected-values with worker pool
         # expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in self.actions)
-        expected = parallel(delayed(parallel_expected_values)(action, scene) for action in self.actions)
+        # expected = parallel(delayed(parallel_expected_values)(action, scene) for action in self.actions)
 
         weights = np.array(expected)
 
@@ -512,7 +512,7 @@ if __name__ == "__main__":
     prog = None
 
     # Initialize worker pool
-    with Parallel(n_jobs=-1, backend="threading") as parallel:
+    with Parallel(n_jobs=multiprocessing.cpu_count()) as parallel:
         for run_through in range(10000):
             rewards = 0
             model_times = 0
