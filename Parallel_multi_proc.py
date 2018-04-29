@@ -4,6 +4,7 @@
 from __future__ import division
 
 import threading
+from functools import partial
 
 import numpy as np
 import cv2
@@ -18,7 +19,8 @@ from skimage.segmentation import felzenszwalb
 # import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 from joblib.pool import has_shareable_memory
-import multiprocessing
+from multiprocessing import Pool
+from itertools import product
 
 
 # Display progress in console
@@ -154,8 +156,6 @@ class Memory:
 
     # Merge and clear
     def Learn(self, k, actions):
-
-
         # TODO: This would improve speed if we figured out how to use new threads inside of a thread
         # # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
         # def duplicate_weights(dist):
@@ -181,7 +181,7 @@ class Memory:
         #     self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
         # Call parallel_kd_tree with worker pool
-        parallel(delayed(parallel_kd_tree)(action, k) for action in actions)
+        self.knn = parallel.map(partial(parallel_kd_tree, memory=self.memory, size=self.memory_size), actions)
 
 
 # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
@@ -195,15 +195,16 @@ def duplicate_weights(dist):
 
 
 # Parallelize KD tree construction across actions
-def parallel_kd_tree(action, k):
+def parallel_kd_tree(action, memory, size):
     # print(threading.get_ident())
-    subspace = hippocampus.memory[hippocampus.memory[:, ACTION_INDEX] == action]
+    subspace = memory[memory[:, ACTION_INDEX] == action]
     subspace_size = subspace.shape[0]
     if subspace_size == 0:
-        subspace = np.zeros((1, hippocampus.memory_size))
+        subspace = np.zeros((1, size))
         subspace_size = 1
-    hippocampus.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights, n_jobs=1)
-    hippocampus.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+    knn = KNeighborsRegressor(n_neighbors=min(agent.k, subspace_size), weights=duplicate_weights, n_jobs=1)
+    knn.fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+    return knn
 
 
 def parallel_expected_values(action, scene):
@@ -512,7 +513,7 @@ if __name__ == "__main__":
     prog = None
 
     # Initialize worker pool
-    with Parallel(n_jobs=action_space.size, backend='threading') as parallel:
+    with Pool(processes=action_space.size) as parallel:
         for run_through in range(10000):
             rewards = 0
             model_times = 0
@@ -608,3 +609,6 @@ if __name__ == "__main__":
 
                 # Initiate progress
                 prog = Progress(0, epoch, "Epoch", True)
+
+    parallel.join()
+    parallel.close()

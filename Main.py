@@ -386,19 +386,22 @@ if __name__ == "__main__":
     TD_ERROR_INDEX = -1
 
     # Environment
-    env = gym.make('CartPole-v0')
+    env_name = 'CartPole-v0'
+    env = gym.make(env_name)
     action_space = np.arange(env.action_space.n)
     objects = None
     properties = None
     state_space = env.observation_space.shape[0]
 
     # Environment
-    # env = gym.make('Pong-v0')
+    # env_name = 'Pong-v0'
+    # env = gym.make(env_name)
     # action_space = np.arange(env.action_space.n)
     # objects = 12
 
     # Environment
-    # env = gym.make('SpaceInvaders-v0')
+    # env_name = 'SpaceInvaders-v0'
+    # env = gym.make(env_name)
     # action_space = np.arange(env.action_space.n)
     # objects = 160
 
@@ -418,8 +421,9 @@ if __name__ == "__main__":
     episode_length = 250
 
     # Initialize metric variables for measuring performance
-    metrics = {'episode': [], 'state': [], 'memory_size': [], 'model_time': [], 'act_time': [], 'learn_time': [],
-               'total_time': [], 'action': [], 'expected_reward': [], 'reward': [], 'finish_time': [], 'episode_time': []}
+    metrics = {'environment': [], 'episode': [], 'state': [], 'memory_size': [], 'model_time': [], 'act_time': [],
+               'learn_time': [], 'total_time': [], 'k': [], 'gamma': [], 'epsilon': [], 'action': [],
+               'expected_reward': [], 'reward': [], 'finish_time': [], 'episode_time': []}
     epoch_rewards = []
     epoch_model_times = []
     epoch_act_times = []
@@ -442,6 +446,7 @@ if __name__ == "__main__":
         for t in range(episode_length):
             state_start = time.time()
 
+            metrics['environment'].append(env_name)
             metrics['episode'].append(run_through)
             metrics['state'].append(t)
             metrics['memory_size'].append(agent.global_memory.length)
@@ -477,6 +482,9 @@ if __name__ == "__main__":
             metrics['action'].append(a)
             metrics['expected_reward'].append(e)
             metrics['reward'].append(r)
+            metrics['k'].append(agent.k)
+            metrics['gamma'].append(agent.gamma)
+            metrics['epsilon'].append(agent.epsilon)
 
             start = time.time()
 
@@ -522,9 +530,7 @@ if __name__ == "__main__":
             prog.update_progress()
 
         if not run_through % epoch:
-            filename = "K_{}_Gamma_{}_Epsilon_{}_Memory_Horizon_{}_Episode_Length_{}_Date{}".format(
-                agent.k, agent.gamma, agent.epsilon, agent.global_memory.memory_horizon, episode_length,
-                datetime.datetime.today().strftime('%m_%d_%Y'))
+            filename = "Env_{}_Date_{}".format(env_name, datetime.datetime.today().strftime('%m_%d_%y'))
             if run_through > 0:
                 print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
                 print("* {} memories stored".format(agent.global_memory.length))
@@ -536,7 +542,7 @@ if __name__ == "__main__":
                 print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
                 print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
             else:
-                pd.DataFrame(data=metrics).to_csv('Data/{}.csv'.format(filename), index=False)
+                pd.DataFrame(data=metrics).to_csv('Data/{}.csv'.format(filename), index=False, columns=['environment', 'episode', 'state', 'memory_size', 'model_time', 'act_time', 'learn_time', 'total_time', 'k', 'gamma', 'epsilon', 'action', 'expected_reward', 'reward', 'finish_time', 'episode_time'])
             epoch_rewards = []
             epoch_model_times = []
             epoch_act_times = []
@@ -545,8 +551,9 @@ if __name__ == "__main__":
             epoch_run_through_times = []
             with open('Data/{}.csv'.format(filename), 'a') as data_file:
                 pd.DataFrame(data=metrics).to_csv(data_file, index=False, header=False)
-            metrics = {'episode': [], 'state': [], 'memory_size': [], 'model_time': [], 'act_time': [], 'learn_time': [],
-                       'total_time': [], 'action': [], 'expected_reward': [], 'reward': [], 'finish_time': [], 'episode_time': []}
+            metrics = {'environment': [], 'episode': [], 'state': [], 'memory_size': [], 'model_time': [], 'act_time': [],
+                       'learn_time': [], 'total_time': [], 'k': [], 'gamma': [], 'epsilon': [], 'action': [],
+                       'expected_reward': [], 'reward': [], 'finish_time': [], 'episode_time': []}
 
             # Initiate progress
             prog = Progress(0, epoch, "Epoch", True)
