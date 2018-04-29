@@ -512,7 +512,7 @@ if __name__ == "__main__":
     prog = None
 
     # Initialize worker pool
-    with Parallel(n_jobs=-1) as parallel:
+    with Parallel(n_jobs=-1, backend="threading") as parallel:
         for run_through in range(10000):
             rewards = 0
             model_times = 0
