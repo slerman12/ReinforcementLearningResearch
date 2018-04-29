@@ -154,14 +154,7 @@ class Memory:
 
     # Merge and clear
     def Learn(self, k, actions):
-        # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
-        def duplicate_weights(dist):
-            for i, point_dist in enumerate(dist):
-                if 0. in point_dist:
-                    dist[i] = point_dist == 0.
-                else:
-                    dist[i] = 1.
-            return dist
+
 
         # TODO: This would improve speed if we figured out how to use new threads inside of a thread
         # # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
@@ -187,23 +180,34 @@ class Memory:
         #             n_jobs=1)
         #     self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
-        # Parallelize KD tree construction across actions
-        def parallel_kd_tree(action):
-            print(threading.get_ident())
-            subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
-            subspace_size = subspace.shape[0]
-            if subspace_size == 0:
-                subspace = np.zeros((1, self.memory_size))
-                subspace_size = 1
-            self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
-                                                   n_jobs=1)
-            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
-
         # Call parallel_kd_tree with worker pool
-        parallel(delayed(has_shareable_memory)(parallel_kd_tree(action)) for action in actions)
+        parallel(delayed(parallel_kd_tree)(action, k) for action in actions)
+
+
+# Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
+def duplicate_weights(dist):
+    for i, point_dist in enumerate(dist):
+        if 0. in point_dist:
+            dist[i] = point_dist == 0.
+        else:
+            dist[i] = 1.
+    return dist
+
+
+# Parallelize KD tree construction across actions
+def parallel_kd_tree(action, k):
+    # print(threading.get_ident())
+    subspace = hippocampus.memory[hippocampus.memory[:, ACTION_INDEX] == action]
+    subspace_size = subspace.shape[0]
+    if subspace_size == 0:
+        subspace = np.zeros((1, hippocampus.memory_size))
+        subspace_size = 1
+    hippocampus.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights, n_jobs=1)
+    hippocampus.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
 
 def parallel_expected_values(action, scene):
+    print(threading.current_thread())
     exp = hippocampus.knn[action].predict([scene])[0] if hippocampus.length > 0 else 0
     return exp
 
