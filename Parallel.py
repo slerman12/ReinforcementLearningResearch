@@ -13,6 +13,7 @@ from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
 from skimage.segmentation import felzenszwalb
 # import matplotlib.pyplot as plt
+import dill
 from joblib import Parallel, delayed
 from joblib.pool import has_shareable_memory
 import multiprocessing
