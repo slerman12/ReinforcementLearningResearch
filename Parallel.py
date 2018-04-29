@@ -140,7 +140,7 @@ class Memory:
         #duplicates = [pool.apply(self.process_duplicates, args=(mem,)) for mem in m.memory]
         #pool = multiprocessing.Pool(processes=4)
         #pool.apply(self.process_duplicates, args=(mem, duplicates)) [for mem in m.memory]
-        Parallel(n_jobs=multiprocessing.cpu_count())(delayed(has_shareable_memory)(self.process_duplicates(mem, duplicates)) for mem in m.memory)
+        Parallel(n_jobs=multiprocessing.cpu_count(), backend="threading")(delayed(self.process_duplicates)(mem, duplicates) for mem in m.memory)
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
