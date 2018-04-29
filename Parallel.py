@@ -1,5 +1,5 @@
-#commented the matplotlib import and Show method because of cycle machine
-#parallizing the process_scene() doesn't seem to be beneficial at the first look
+# commented the matplotlib import and Show method because of cycle machine
+# parallizing the process_scene() doesn't seem to be beneficial at the first look
 
 from __future__ import division
 import numpy as np
@@ -13,7 +13,6 @@ from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
 from skimage.segmentation import felzenszwalb
 # import matplotlib.pyplot as plt
-import dill
 from joblib import Parallel, delayed
 from joblib.pool import has_shareable_memory
 import multiprocessing
@@ -200,6 +199,11 @@ class Memory:
         parallel(delayed(has_shareable_memory)(parallel_kd_tree(action)) for action in actions)
 
 
+def parallel_expected_values(action, scene):
+    exp = hippocampus.knn[action].predict([scene])[0] if hippocampus.length > 0 else 0
+    return exp
+
+
 class Agent:
     def __init__(self, model, global_memory, actions, local_memory_horizon, gamma, epsilon, k):
         self.global_memory = global_memory
@@ -215,10 +219,6 @@ class Agent:
     def Model(self, state):
         return self.model.Update(state)
 
-    def parallel_expected_values(self, action, scene):
-        exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-        return exp
-
     def Act(self, scene):
         # Initialize probabilities
         expected = []
@@ -226,12 +226,12 @@ class Agent:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # Get expected reward for each action
-#        def process_actions(act, expctd):
-#            exp = self.global_memory.knn[act].predict([scene])[0] if self.global_memory.length > 0 else 0
-#            expctd.append(exp)
-#
-#        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-#            pool.starmap(process_actions, product([action for action in self.actions], expected))
+        #        def process_actions(act, expctd):
+        #            exp = self.global_memory.knn[act].predict([scene])[0] if self.global_memory.length > 0 else 0
+        #            expctd.append(exp)
+        #
+        #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+        #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
         # for action in self.actions:
         #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
@@ -239,7 +239,7 @@ class Agent:
 
         # Call parallel_expected-values with worker pool
         # expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in self.actions)
-        expected = parallel(delayed(self.parallel_expected_values)(action, scene) for action in self.actions)
+        expected = parallel(delayed(parallel_expected_values)(action, scene) for action in self.actions)
 
         weights = np.array(expected)
 
@@ -301,7 +301,8 @@ class Felsenszwalb:
         previous = None
 
         def array(self):
-            return np.ndarray((1, 5), buffer=np.array([self.area, self.x, self.y, self.trajectory_x, self.trajectory_y]))
+            return np.ndarray((1, 5),
+                              buffer=np.array([self.area, self.x, self.y, self.trajectory_x, self.trajectory_y]))
 
         def __eq__(self, another):
             # Might be good to not include 'previous' attribute
@@ -322,7 +323,7 @@ class Felsenszwalb:
                 self.array = np.ndarray((1, 5), buffer=np.array([o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]))
             else:
                 self.array = np.append(self.array, np.array([[o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]]),
-                        axis=0)
+                                       axis=0)
 
                 def forget(self):
                     self.previous = None
@@ -349,7 +350,7 @@ class Felsenszwalb:
                 scene[index, 3] = self.objects[index].trajectory_x
                 scene[index, 4] = self.objects[index].trajectory_y
 
-            #with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+            # with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
             #    pool.starmap(process_scene, product([index for index in range(min(object_capacity, self.length))], scene))
 
             return scene.flatten()
@@ -437,16 +438,16 @@ class Felsenszwalb:
 
         return scene
 
-#    def Show(self):
-#        if self.state is not None and self.segments is not None:
-#            # Show segments
-#            figure = plt.figure("Segments")
-#            ax = figure.add_subplot(1, 1, 1)
-#            ax.imshow(mark_boundaries(self.state, self.segments))
-#            plt.axis("off")
-#
-#            # Plot
-#            plt.show()
+    #    def Show(self):
+    #        if self.state is not None and self.segments is not None:
+    #            # Show segments
+    #            figure = plt.figure("Segments")
+    #            ax = figure.add_subplot(1, 1, 1)
+    #            ax.imshow(mark_boundaries(self.state, self.segments))
+    #            plt.axis("off")
+    #
+    #            # Plot
+    #            plt.show()
 
     def __eq__(self, another):
         # Might be good to not include 'previous' attribute
@@ -579,10 +580,12 @@ if __name__ == "__main__":
 
             if not run_through % epoch:
                 if run_through > 0:
-                    print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
+                    print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch,
+                                                                                    np.mean(epoch_rewards)))
                     print("* {} memories stored".format(agent.global_memory.length))
                     print("* {} duplicates".format(agent.global_memory.duplicates))
-                    print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount, agent.epsilon))
+                    print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount,
+                                                                            agent.epsilon))
                     print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
                     print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
                     print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
