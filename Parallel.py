@@ -85,7 +85,7 @@ class Memory:
         self.remove = np.array([])
 
     def process_duplicates(self, mem, dup):
-        #print("entered process_duplicates()")
+        # print("entered process_duplicates()")
         try:
             # This in particular is likely the cause
             duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
@@ -117,6 +117,21 @@ class Memory:
 
         # HI MOHSEN THIS IS STUFF HELLO
 
+        # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
+        # for mem in m.memory:
+        #     try:
+        #         # This in particular is likely the cause
+        #         duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+        #         self.duplicates += 1
+        #
+        #         if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
+        #             mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
+        #             mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
+        #
+        #         duplicates.append(duplicate)
+        #     except IndexError:
+        #         pass
+
         #pool = multiprocessing.Pool(multiprocessing.cpu_count())
         #process_duplicates_input = {mem_in: [mem for mem in m.memory], duplicates}
         #with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
@@ -125,7 +140,7 @@ class Memory:
         #duplicates = [pool.apply(self.process_duplicates, args=(mem,)) for mem in m.memory]
         #pool = multiprocessing.Pool(processes=4)
         #pool.apply(self.process_duplicates, args=(mem, duplicates)) [for mem in m.memory]
-        Parallel(n_jobs=multiprocessing.cpu_count(), max_nbytes=1e6, backend="threading")(delayed(has_shareable_memory)(self.process_duplicates(mem, duplicates)) for mem in m.memory)
+        Parallel(n_jobs=multiprocessing.cpu_count())(delayed(has_shareable_memory)(self.process_duplicates(mem, duplicates)) for mem in m.memory)
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
@@ -165,6 +180,8 @@ class Memory:
             self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
                     n_jobs=1)
             self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+
+        # Parallel(n_jobs=multiprocessing.cpu_count(), max_nbytes=1e6, backend="threading")(delayed(has_shareable_memory)(self.process_actions(action)) for action in actions)
 
 
 class Agent:
