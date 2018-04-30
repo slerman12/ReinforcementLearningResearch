@@ -265,14 +265,14 @@ class Agent:
         #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
         #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
+        # Comment this out and un-comment the next line if you want to make querying the kd tree parallel. This
+        # is painfully slow because it has to copy the kd tree for every worker process
         for action in self.actions:
             exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
             expected.append(exp)
 
         # Call parallel_expected-values with worker pool
-        # expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in self.actions)
-        # expected = parallel(delayed(parallel_expected_values)(action, scene) for action in self.actions)
-        # expected = parallel.map(partial(parallel_expected_values, scene=scene), hippocampus.knn) \
+        # expected = parallel.map(partial(parallel_expected_values, scene=scene), self.global_memory.knn) \
         #     if self.global_memory.length > 0 else [0 for _ in self.actions]
 
         weights = np.array(expected)
