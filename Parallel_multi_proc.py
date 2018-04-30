@@ -214,10 +214,9 @@ def parallel_kd_tree(action, memory, size):
     return knn
 
 
-def parallel_expected_values(action, scene):
+def parallel_expected_values(knn, scene):
     # print(threading.current_thread())
-    exp = hippocampus.knn[action].predict([scene])[0] if hippocampus.length > 0 else 0
-    return exp
+    return knn.predict([scene])[0]
 
 
 class Agent:
@@ -249,13 +248,15 @@ class Agent:
         #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
         #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
-        for action in self.actions:
-            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-            expected.append(exp)
+        # for action in self.actions:
+        #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+        #     expected.append(exp)
 
         # Call parallel_expected-values with worker pool
         # expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in self.actions)
         # expected = parallel(delayed(parallel_expected_values)(action, scene) for action in self.actions)
+        expected = parallel.map(partial(parallel_expected_values, scene=scene), self.global_memory.knn) \
+            if self.global_memory.length > 0 else [0 for _ in self.actions]
 
         weights = np.array(expected)
 
