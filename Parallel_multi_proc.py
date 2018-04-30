@@ -3,6 +3,8 @@
 
 from __future__ import division
 
+import ctypes
+import multiprocessing
 import threading
 from functools import partial
 
@@ -59,8 +61,12 @@ class Memory:
     def __init__(self, memory_size, memory_horizon):
         self.memory_size = memory_size
         self.memory_horizon = memory_horizon
+        self.memory = self.initialize_memory()
 
-        self.memory = np.zeros((1, self.memory_size))
+    def initialize_memory(self):
+        shared_array_base = multiprocessing.Array(ctypes.c_double, self.memory_size)
+        shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
+        return shared_array.reshape(1, self.memory_size)
 
     def Add(self, scene, action, reward, expected):
         attributes = np.zeros(NUM_ATTRIBUTES)
@@ -82,8 +88,8 @@ class Memory:
             self.length += 1
 
     def Reset(self):
-        self.memory = np.zeros((1, self.memory_size))
-        self.length = 1
+        self.memory = self.initialize_memory()
+        self.length = 0
         self.remove = np.array([])
 
     # Merge and clear
