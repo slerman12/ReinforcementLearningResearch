@@ -108,19 +108,23 @@ class Memory:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
-        for mem in m.memory:
-            try:
-                # This in particular is likely the cause
-                duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
-                self.duplicates += 1
+        # for mem in m.memory:
+        #     try:
+        #         # This in particular is likely the cause
+        #         duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+        #         self.duplicates += 1
+        #
+        #         if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
+        #             mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
+        #             mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
+        #
+        #         duplicates.append(duplicate)
+        #     except IndexError:
+        #         pass
 
-                if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
-                    mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
-                    mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
+        duplicates = parallel.map(partial(parallel_duplicates, memory=self.memory), m.memory)
 
-                duplicates.append(duplicate)
-            except IndexError:
-                pass
+        duplicates = np.where(duplicates != "temp")
 
         # TODO: either re-write this method or account for duplicates list and large memory allocation
         # def parallel_duplicates(mem, dup):
@@ -218,6 +222,20 @@ def parallel_expected_values(knn, scene):
     return knn.predict([scene])[0]
 
 
+def parallel_duplicates(mem, memory):
+    try:
+        # This in particular is likely the cause
+        duplicate = np.argwhere(np.equal(memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+
+        if memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
+            mem[REWARD_INDEX] = memory[duplicate, REWARD_INDEX]
+            mem[VALUE_INDEX] = memory[duplicate, VALUE_INDEX]
+
+        return duplicate
+    except IndexError:
+        return "temp"
+
+
 class Agent:
     def __init__(self, model, global_memory, actions, local_memory_horizon, gamma, epsilon, k):
         self.global_memory = global_memory
@@ -247,15 +265,15 @@ class Agent:
         #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
         #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
-        # for action in self.actions:
-        #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-        #     expected.append(exp)
+        for action in self.actions:
+            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+            expected.append(exp)
 
         # Call parallel_expected-values with worker pool
         # expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in self.actions)
         # expected = parallel(delayed(parallel_expected_values)(action, scene) for action in self.actions)
-        expected = parallel.map(partial(parallel_expected_values, scene=scene), self.global_memory.knn) \
-            if self.global_memory.length > 0 else [0 for _ in self.actions]
+        # expected = parallel.map(partial(parallel_expected_values, scene=scene), hippocampus.knn) \
+        #     if self.global_memory.length > 0 else [0 for _ in self.actions]
 
         weights = np.array(expected)
 
@@ -520,7 +538,7 @@ if __name__ == "__main__":
     prog = None
 
     # Initialize worker pool
-    parallel = Pool(processes=action_space.size)
+    parallel = Pool(processes=multiprocessing.cpu_count())
 
     for run_through in range(10000):
         rewards = 0
