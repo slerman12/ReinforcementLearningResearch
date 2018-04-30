@@ -57,16 +57,17 @@ class Memory:
     knn = {}
     remove = np.array([])
     duplicates = 0
+    memory = None
+    shared_array_base = None
 
     def __init__(self, memory_size, memory_horizon):
         self.memory_size = memory_size
         self.memory_horizon = memory_horizon
-        self.memory = self.initialize_memory()
+        self.initialize_memory()
 
     def initialize_memory(self):
-        shared_array_base = multiprocessing.Array(ctypes.c_double, self.memory_size)
-        shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
-        return shared_array.reshape(1, self.memory_size)
+        self.shared_array_base = multiprocessing.Array(ctypes.c_double, self.memory_size)
+        self.memory = np.ctypeslib.as_array(self.shared_array_base.get_obj()).reshape(1, self.memory_size)
 
     def Add(self, scene, action, reward, expected):
         attributes = np.zeros(NUM_ATTRIBUTES)
