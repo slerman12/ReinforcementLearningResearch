@@ -23,6 +23,7 @@ from joblib import Parallel, delayed
 from joblib.pool import has_shareable_memory
 from multiprocessing import Pool
 from itertools import product
+import pickle
 
 
 # Display progress in console
@@ -215,11 +216,12 @@ def parallel_kd_tree(action, memory, size):
         subspace_size = 1
     knn = KNeighborsRegressor(n_neighbors=min(agent.k, subspace_size), weights=duplicate_weights, n_jobs=1)
     knn.fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+    pickle.dump(knn, open('knn_{}'.format(action), 'wb'))
     return knn
 
 
-def parallel_expected_values(knn, scene):
-    return knn.predict([scene])[0]
+def parallel_expected_values(action, scene):
+    return pickle.load(open('knn_{}'.format(action), 'rb')).predict([scene])[0]
 
 
 def parallel_duplicates(mem, memory):
@@ -267,13 +269,13 @@ class Agent:
 
         # Comment this out and un-comment the next line if you want to make querying the kd tree parallel. This
         # is painfully slow because it has to copy the kd tree for every worker process
-        for action in self.actions:
-            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-            expected.append(exp)
+        # for action in self.actions:
+        #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+        #     expected.append(exp)
 
         # Call parallel_expected-values with worker pool
-        # expected = parallel.map(partial(parallel_expected_values, scene=scene), self.global_memory.knn) \
-        #     if self.global_memory.length > 0 else [0 for _ in self.actions]
+        expected = parallel.map(partial(parallel_expected_values, scene=scene), self.actions) \
+            if self.global_memory.length > 0 else [0 for _ in self.actions]
 
         weights = np.array(expected)
 
