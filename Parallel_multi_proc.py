@@ -215,7 +215,6 @@ def parallel_kd_tree(action, memory, size):
 
 
 def parallel_expected_values(knn, scene):
-    # print(threading.current_thread())
     return knn.predict([scene])[0]
 
 
