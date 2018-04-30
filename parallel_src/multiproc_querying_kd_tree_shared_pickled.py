@@ -246,7 +246,7 @@ class Agent:
         self.global_memory = global_memory
         self.actions = actions
         self.local_memory_horizon = local_memory_horizon
-        self.reward_discount = gamma
+        self.gamma = gamma
         self.epsilon = epsilon
         self.k = k
 
@@ -291,7 +291,7 @@ class Agent:
         self.local_memory.Add(scene, action, reward, expected)
 
     def Finish_Merge(self):
-        self.global_memory.Merge(self.local_memory, self.reward_discount)
+        self.global_memory.Merge(self.local_memory, self.gamma)
         self.local_memory.Reset()
 
     def Finish_Learn(self):

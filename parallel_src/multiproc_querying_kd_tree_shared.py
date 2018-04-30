@@ -219,7 +219,6 @@ def parallel_kd_tree(action, memory, size):
         subspace_size = 1
     knn = KNeighborsRegressor(n_neighbors=min(agent.k, subspace_size), weights=duplicate_weights, n_jobs=1)
     knn.fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
-    pickle.dump(knn, open('knn_{}'.format(action), 'wb'))
     return knn
 
 
@@ -246,7 +245,7 @@ class Agent:
         self.global_memory = global_memory
         self.actions = actions
         self.local_memory_horizon = local_memory_horizon
-        self.reward_discount = gamma
+        self.gamma = gamma
         self.epsilon = epsilon
         self.k = k
 
@@ -291,7 +290,7 @@ class Agent:
         self.local_memory.Add(scene, action, reward, expected)
 
     def Finish_Merge(self):
-        self.global_memory.Merge(self.local_memory, self.reward_discount)
+        self.global_memory.Merge(self.local_memory, self.gamma)
         self.local_memory.Reset()
 
     def Finish_Learn(self):
