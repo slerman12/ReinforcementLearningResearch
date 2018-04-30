@@ -4,6 +4,7 @@
 from __future__ import division
 
 import ctypes
+import datetime
 import multiprocessing
 import threading
 from functools import partial
@@ -14,6 +15,8 @@ import gym
 import time
 import copy
 import sys
+
+import pandas as pd
 from sklearn import random_projection
 from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
@@ -62,12 +65,7 @@ class Memory:
     def __init__(self, memory_size, memory_horizon):
         self.memory_size = memory_size
         self.memory_horizon = memory_horizon
-        self.memory = self.initialize_memory()
-
-    def initialize_memory(self):
-        self.shared_array_base = multiprocessing.Array(ctypes.c_double, self.memory_size)
-        shared_array = np.ctypeslib.as_array(self.shared_array_base.get_obj())
-        return shared_array.reshape(1, self.memory_size)
+        self.memory = np.zeros((1, self.memory_size))
 
     def Add(self, scene, action, reward, expected):
         attributes = np.zeros(NUM_ATTRIBUTES)
@@ -181,18 +179,18 @@ class Memory:
         #     return dist
 
         # This is  slow -- bottleneck
-        # for action in actions:
-        #     subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
-        #     subspace_size = subspace.shape[0]
-        #     if subspace_size == 0:
-        #         subspace = np.zeros((1, self.memory_size))
-        #         subspace_size = 1
-        #     self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
-        #             n_jobs=1)
-        #     self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+        for action in actions:
+            subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
+            subspace_size = subspace.shape[0]
+            if subspace_size == 0:
+                subspace = np.zeros((1, self.memory_size))
+                subspace_size = 1
+            self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
+                    n_jobs=1)
+            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
         # Call parallel_kd_tree with worker pool
-        self.knn = parallel.map(partial(parallel_kd_tree, memory=self.memory, size=self.memory_size), actions)
+        # self.knn = parallel.map(partial(parallel_kd_tree, memory=self.memory, size=self.memory_size), actions)
 
 
 # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
@@ -498,7 +496,8 @@ if __name__ == "__main__":
     TD_ERROR_INDEX = -1
 
     # Environment
-    env = gym.make('CartPole-v0')
+    env_name = 'CartPole-v0'
+    env = gym.make(env_name)
     action_space = np.arange(env.action_space.n)
     objects = None
     properties = None
@@ -528,6 +527,12 @@ if __name__ == "__main__":
 
     epoch = 100
 
+    episode_length = 250
+
+    # Initialize metric variables for measuring performance
+    metrics = {'episode': [], 'memory_size': [], 'model_time': [], 'act_time': [],
+               'learn_time': [], 'finish_time': [], 'episode_time': [], 'reward': []}
+
     # Initialize metric variables for measuring performance
     epoch_rewards = []
     epoch_model_times = []
@@ -551,7 +556,8 @@ if __name__ == "__main__":
         # Initialize environment
         s = env.reset()
 
-        for t in range(250):
+        for t in range(episode_length):
+            state_start = time.time()
 
             # Display environment
             # if run_through > 400:
@@ -587,6 +593,8 @@ if __name__ == "__main__":
             end = time.time()
             learn_times += end - start
 
+            state_end = time.time()
+
             # Break at end of run-through
             if done:
                 break
@@ -600,7 +608,8 @@ if __name__ == "__main__":
         agent.Finish_Learn()
 
         end = time.time()
-        epoch_finish_times.append(end - start)
+        finish_time = end - start
+        epoch_finish_times.append(finish_time)
 
         epoch_rewards.append(rewards)
         epoch_model_times.append(model_times)
@@ -610,28 +619,44 @@ if __name__ == "__main__":
         run_through_end = time.time()
         epoch_run_through_times.append(run_through_end - run_through_start)
 
+        metrics['episode'].append(run_through)
+        metrics['memory_size'].append(hippocampus.length)
+        metrics['model_time'].append(model_times)
+        metrics['act_time'].append(act_times)
+        metrics['learn_time'].append(learn_times)
+        metrics['finish_time'].append(finish_time)
+        metrics['episode_time'].append(run_through_end - run_through_start)
+        metrics['reward'].append(rewards)
+
         if prog is not None:
             prog.update_progress()
 
         if not run_through % epoch:
+            filename_suffix = "multiproc_handling_duplicates_unshared"
+            filename = "Env_{}_Date_{}_{}".format(env_name, datetime.datetime.today().strftime('%m_%d_%y'), filename_suffix)
             if run_through > 0:
-                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch,
-                                                                                np.mean(epoch_rewards)))
+                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
                 print("* {} memories stored".format(agent.global_memory.length))
                 print("* {} duplicates".format(agent.global_memory.duplicates))
-                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount,
-                                                                        agent.epsilon))
+                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.gamma, agent.epsilon))
                 print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
                 print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
                 print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
                 print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
                 print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
+            else:
+                pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv('Data/{}.csv'.format(filename), index=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
+
             epoch_rewards = []
             epoch_model_times = []
             epoch_act_times = []
             epoch_learn_times = []
             epoch_finish_times = []
             epoch_run_through_times = []
+            with open('Data/{}.csv'.format(filename), 'a') as data_file:
+                pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv(data_file, index=False, header=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
+            metrics = {'episode': [], 'memory_size': [], 'model_time': [], 'act_time': [],
+                       'learn_time': [], 'finish_time': [], 'episode_time': [], 'reward': []}
 
             # Initiate progress
             prog = Progress(0, epoch, "Epoch", True)

@@ -3,10 +3,8 @@
 
 from __future__ import division
 
-import ctypes
-import multiprocessing
+import datetime
 import threading
-from functools import partial
 
 import numpy as np
 import cv2
@@ -14,6 +12,8 @@ import gym
 import time
 import copy
 import sys
+
+import pandas as pd
 from sklearn import random_projection
 from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
@@ -21,9 +21,7 @@ from skimage.segmentation import felzenszwalb
 # import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 from joblib.pool import has_shareable_memory
-from multiprocessing import Pool
-from itertools import product
-import pickle
+import multiprocessing
 
 
 # Display progress in console
@@ -58,17 +56,12 @@ class Memory:
     knn = {}
     remove = np.array([])
     duplicates = 0
-    shared_array_base = None
 
     def __init__(self, memory_size, memory_horizon):
         self.memory_size = memory_size
         self.memory_horizon = memory_horizon
-        self.memory = self.initialize_memory()
 
-    def initialize_memory(self):
-        self.shared_array_base = multiprocessing.Array(ctypes.c_double, self.memory_size)
-        shared_array = np.ctypeslib.as_array(self.shared_array_base.get_obj())
-        return shared_array.reshape(1, self.memory_size)
+        self.memory = np.zeros((1, self.memory_size))
 
     def Add(self, scene, action, reward, expected):
         attributes = np.zeros(NUM_ATTRIBUTES)
@@ -90,8 +83,8 @@ class Memory:
             self.length += 1
 
     def Reset(self):
-        self.memory = self.initialize_memory()
-        self.length = 0
+        self.memory = np.zeros((1, self.memory_size))
+        self.length = 1
         self.remove = np.array([])
 
     # Merge and clear
@@ -109,23 +102,19 @@ class Memory:
         # HI MOHSEN THIS IS STUFF HELLO
 
         # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
-        # for mem in m.memory:
-        #     try:
-        #         # This in particular is likely the cause
-        #         duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
-        #         self.duplicates += 1
-        #
-        #         if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
-        #             mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
-        #             mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
-        #
-        #         duplicates.append(duplicate)
-        #     except IndexError:
-        #         pass
+        for mem in m.memory:
+            try:
+                # This in particular is likely the cause
+                duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+                self.duplicates += 1
 
-        duplicates = parallel.map(partial(parallel_duplicates, memory=self.memory), m.memory)
+                if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
+                    mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
+                    mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
 
-        duplicates = np.where(duplicates != "temp")
+                duplicates.append(duplicate)
+            except IndexError:
+                pass
 
         # TODO: either re-write this method or account for duplicates list and large memory allocation
         # def parallel_duplicates(mem, dup):
@@ -168,6 +157,8 @@ class Memory:
 
     # Merge and clear
     def Learn(self, k, actions):
+
+
         # TODO: This would improve speed if we figured out how to use new threads inside of a thread
         # # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
         # def duplicate_weights(dist):
@@ -193,7 +184,7 @@ class Memory:
         #     self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
         # Call parallel_kd_tree with worker pool
-        self.knn = parallel.map(partial(parallel_kd_tree, memory=self.memory, size=self.memory_size), actions)
+        parallel(delayed(parallel_kd_tree)(action, k) for action in actions)
 
 
 # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
@@ -207,35 +198,21 @@ def duplicate_weights(dist):
 
 
 # Parallelize KD tree construction across actions
-def parallel_kd_tree(action, memory, size):
+def parallel_kd_tree(action, k):
     # print(threading.get_ident())
-    subspace = memory[memory[:, ACTION_INDEX] == action]
+    subspace = hippocampus.memory[hippocampus.memory[:, ACTION_INDEX] == action]
     subspace_size = subspace.shape[0]
     if subspace_size == 0:
-        subspace = np.zeros((1, size))
+        subspace = np.zeros((1, hippocampus.memory_size))
         subspace_size = 1
-    knn = KNeighborsRegressor(n_neighbors=min(agent.k, subspace_size), weights=duplicate_weights, n_jobs=1)
-    knn.fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
-    pickle.dump(knn, open('knn_{}'.format(action), 'wb'))
-    return knn
+    hippocampus.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights, n_jobs=1)
+    hippocampus.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
 
 def parallel_expected_values(action, scene):
-    return pickle.load(open('knn_{}'.format(action), 'rb')).predict([scene])[0]
-
-
-def parallel_duplicates(mem, memory):
-    try:
-        # This in particular is likely the cause
-        duplicate = np.argwhere(np.equal(memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
-
-        if memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
-            mem[REWARD_INDEX] = memory[duplicate, REWARD_INDEX]
-            mem[VALUE_INDEX] = memory[duplicate, VALUE_INDEX]
-
-        return duplicate
-    except IndexError:
-        return "temp"
+    # print(threading.current_thread())
+    exp = hippocampus.knn[action].predict([scene])[0] if hippocampus.length > 0 else 0
+    return exp
 
 
 class Agent:
@@ -267,15 +244,13 @@ class Agent:
         #        with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
         #            pool.starmap(process_actions, product([action for action in self.actions], expected))
 
-        # Comment this out and un-comment the next line if you want to make querying the kd tree parallel. This
-        # is painfully slow because it has to copy the kd tree for every worker process
-        # for action in self.actions:
-        #     exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
-        #     expected.append(exp)
+        for action in self.actions:
+            exp = self.global_memory.knn[action].predict([scene])[0] if self.global_memory.length > 0 else 0
+            expected.append(exp)
 
         # Call parallel_expected-values with worker pool
-        expected = parallel.map(partial(parallel_expected_values, scene=scene), self.actions) \
-            if self.global_memory.length > 0 else [0 for _ in self.actions]
+        # expected = parallel(delayed(has_shareable_memory)(parallel_expected_values(action)) for action in self.actions)
+        # expected = parallel(delayed(parallel_expected_values)(action, scene) for action in self.actions)
 
         weights = np.array(expected)
 
@@ -361,8 +336,8 @@ class Felsenszwalb:
                 self.array = np.append(self.array, np.array([[o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]]),
                                        axis=0)
 
-        def forget(self):
-            self.previous = None
+                def forget(self):
+                    self.previous = None
             for o in self.objects:
                 o.previous = None
 
@@ -500,19 +475,22 @@ if __name__ == "__main__":
     TD_ERROR_INDEX = -1
 
     # Environment
-    env = gym.make('CartPole-v0')
+    env_name = 'CartPole-v0'
+    env = gym.make(env_name)
     action_space = np.arange(env.action_space.n)
     objects = None
     properties = None
     state_space = env.observation_space.shape[0]
 
     # Environment
-    # env = gym.make('Pong-v0')
+    # env_name = 'Pong-v0'
+    # env = gym.make(env_name)
     # action_space = np.arange(env.action_space.n)
     # objects = 12
 
     # Environment
-    # env = gym.make('SpaceInvaders-v0')
+    # env_name = 'SpaceInvaders-v0'
+    # env = gym.make(env_name)
     # action_space = np.arange(env.action_space.n)
     # objects = 160
 
@@ -529,7 +507,11 @@ if __name__ == "__main__":
     agent = Agent(occipital, hippocampus, action_space, local_memory_horizon=1000, gamma=0.999, epsilon=1, k=50)
 
     epoch = 100
+    episode_length = 250
 
+    # Initialize metric variables for measuring performance
+    metrics = {'episode': [], 'memory_size': [], 'model_time': [], 'act_time': [],
+               'learn_time': [], 'finish_time': [], 'episode_time': [], 'reward': []}
     # Initialize metric variables for measuring performance
     epoch_rewards = []
     epoch_model_times = []
@@ -540,103 +522,119 @@ if __name__ == "__main__":
     prog = None
 
     # Initialize worker pool
-    parallel = Pool(processes=multiprocessing.cpu_count())
+    with Parallel(n_jobs=action_space.size, backend='threading') as parallel:
+        for run_through in range(10000):
+            rewards = 0
+            model_times = 0
+            act_times = 0
+            learn_times = 0
 
-    for run_through in range(10000):
-        rewards = 0
-        model_times = 0
-        act_times = 0
-        learn_times = 0
+            run_through_start = time.time()
 
-        run_through_start = time.time()
+            # Initialize environment
+            s = env.reset()
 
-        # Initialize environment
-        s = env.reset()
+            for t in range(episode_length):
+                state_start = time.time()
 
-        for t in range(250):
+                # Display environment
+                # if run_through > 400:
+                #     env.render()
 
-            # Display environment
-            # if run_through > 400:
-            #     env.render()
+                start = time.time()
+
+                # Get scene from model
+                # sc = agent.Model(s)
+                sc = s
+
+                end = time.time()
+                model_times += end - start
+
+                start = time.time()
+
+                # Likelihood of picking a random action
+                agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
+                a, e = agent.Act(scene=sc)
+
+                end = time.time()
+                act_times += end - start
+
+                s, r, done, info = env.step(a)
+
+                rewards += r
+
+                start = time.time()
+
+                # Learn from the reward
+                agent.Learn(sc, a, r, e)
+
+                end = time.time()
+                learn_times += end - start
+
+                state_end = time.time()
+
+                # Break at end of run-through
+                if done:
+                    break
 
             start = time.time()
 
-            # Get scene from model
-            # sc = agent.Model(s)
-            sc = s
+            # Update temporally discounted rewards and dump run-through's memories into global memory
+            agent.Finish_Merge()
+
+            # Build kNN tree, etc.
+            agent.Finish_Learn()
 
             end = time.time()
-            model_times += end - start
+            finish_time = end - start
+            epoch_finish_times.append(finish_time)
 
-            start = time.time()
+            epoch_rewards.append(rewards)
+            epoch_model_times.append(model_times)
+            epoch_act_times.append(act_times)
+            epoch_learn_times.append(learn_times)
 
-            # Likelihood of picking a random action
-            agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
-            a, e = agent.Act(scene=sc)
+            run_through_end = time.time()
+            epoch_run_through_times.append(run_through_end - run_through_start)
 
-            end = time.time()
-            act_times += end - start
+            metrics['episode'].append(run_through)
+            metrics['memory_size'].append(hippocampus.length)
+            metrics['model_time'].append(model_times)
+            metrics['act_time'].append(act_times)
+            metrics['learn_time'].append(learn_times)
+            metrics['finish_time'].append(finish_time)
+            metrics['episode_time'].append(run_through_end - run_through_start)
+            metrics['reward'].append(rewards)
 
-            s, r, done, info = env.step(a)
+            if prog is not None:
+                prog.update_progress()
 
-            rewards += r
+            if not run_through % epoch:
+                filename_suffix = "threading_unshared_constructing_kd_tree_original"
+                filename = "Env_{}_Date_{}_{}".format(env_name, datetime.datetime.today().strftime('%m_%d_%y'), filename_suffix)
+                if run_through > 0:
+                    print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
+                    print("* {} memories stored".format(agent.global_memory.length))
+                    print("* {} duplicates".format(agent.global_memory.duplicates))
+                    print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.gamma, agent.epsilon))
+                    print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
+                    print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
+                    print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
+                    print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
+                    print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
+                else:
+                    pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv('Data/{}.csv'.format(filename), index=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
 
-            start = time.time()
+                epoch_rewards = []
+                epoch_model_times = []
+                epoch_act_times = []
+                epoch_learn_times = []
+                epoch_finish_times = []
+                epoch_run_through_times = []
+                with open('Data/{}.csv'.format(filename), 'a') as data_file:
+                    pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv(data_file, index=False, header=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
+                metrics = {'episode': [], 'memory_size': [], 'model_time': [], 'act_time': [],
+                           'learn_time': [], 'finish_time': [], 'episode_time': [], 'reward': []}
 
-            # Learn from the reward
-            agent.Learn(sc, a, r, e)
-
-            end = time.time()
-            learn_times += end - start
-
-            # Break at end of run-through
-            if done:
-                break
-
-        start = time.time()
-
-        # Update temporally discounted rewards and dump run-through's memories into global memory
-        agent.Finish_Merge()
-
-        # Build kNN tree, etc.
-        agent.Finish_Learn()
-
-        end = time.time()
-        epoch_finish_times.append(end - start)
-
-        epoch_rewards.append(rewards)
-        epoch_model_times.append(model_times)
-        epoch_act_times.append(act_times)
-        epoch_learn_times.append(learn_times)
-
-        run_through_end = time.time()
-        epoch_run_through_times.append(run_through_end - run_through_start)
-
-        if prog is not None:
-            prog.update_progress()
-
-        if not run_through % epoch:
-            if run_through > 0:
-                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch,
-                                                                                np.mean(epoch_rewards)))
-                print("* {} memories stored".format(agent.global_memory.length))
-                print("* {} duplicates".format(agent.global_memory.duplicates))
-                print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.reward_discount,
-                                                                        agent.epsilon))
-                print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
-                print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
-                print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
-                print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
-                print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
-            epoch_rewards = []
-            epoch_model_times = []
-            epoch_act_times = []
-            epoch_learn_times = []
-            epoch_finish_times = []
-            epoch_run_through_times = []
-
-            # Initiate progress
-            prog = Progress(0, epoch, "Epoch", True)
-
-    parallel.join()
-    parallel.close()
+                # Initiate progress
+                prog = Progress(0, epoch, "Epoch", True)
