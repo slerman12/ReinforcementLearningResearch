@@ -341,8 +341,8 @@ class Felsenszwalb:
                 self.array = np.append(self.array, np.array([[o.area, o.x, o.y, o.trajectory_x, o.trajectory_y]]),
                                        axis=0)
 
-                def forget(self):
-                    self.previous = None
+        def forget(self):
+            self.previous = None
             for o in self.objects:
                 o.previous = None
 
