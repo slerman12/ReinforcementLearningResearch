@@ -618,5 +618,5 @@ if __name__ == "__main__":
             # Initiate progress
             prog = Progress(0, epoch, "Epoch", True)
 
-parallel.join()
-parallel.close()
+    parallel.join()
+    parallel.close()
