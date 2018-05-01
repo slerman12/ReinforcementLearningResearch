@@ -199,7 +199,6 @@ class Memory:
         # Call parallel_kd_tree with worker pool
         self.knn = parallel.map(partial(parallel_kd_tree, memory=self.memory, size=self.memory_size), actions)
 
-        parallel.join()
         parallel.close()
 
 
