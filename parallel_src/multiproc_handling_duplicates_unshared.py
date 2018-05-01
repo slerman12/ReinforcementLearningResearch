@@ -87,7 +87,7 @@ class Memory:
             self.length += 1
 
     def Reset(self):
-        self.memory = self.initialize_memory()
+        self.memory = np.zeros((1, self.memory_size))
         self.length = 0
         self.remove = np.array([])
 
