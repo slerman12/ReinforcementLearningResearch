@@ -185,18 +185,18 @@ class Memory:
         #     return dist
 
         # This is  slow -- bottleneck
-        for action in actions:
-            subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
-            subspace_size = subspace.shape[0]
-            if subspace_size == 0:
-                subspace = np.zeros((1, self.memory_size))
-                subspace_size = 1
-            self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
-                    n_jobs=1)
-            self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+        # for action in actions:
+        #     subspace = self.memory[self.memory[:, ACTION_INDEX] == action]
+        #     subspace_size = subspace.shape[0]
+        #     if subspace_size == 0:
+        #         subspace = np.zeros((1, self.memory_size))
+        #         subspace_size = 1
+        #     self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
+        #             n_jobs=1)
+        #     self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
 
         # Call parallel_kd_tree with worker pool
-        # self.knn = parallel.map(partial(parallel_kd_tree, memory=self.memory, size=self.memory_size), actions)
+        self.knn = parallel.map(partial(parallel_kd_tree, memory=self.memory, size=self.memory_size), actions)
 
 
 # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
