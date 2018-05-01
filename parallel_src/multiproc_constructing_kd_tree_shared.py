@@ -26,7 +26,6 @@ from joblib import Parallel, delayed
 from joblib.pool import has_shareable_memory
 from multiprocessing import Pool
 from itertools import product
-import pickle
 
 
 # Display progress in console
@@ -219,12 +218,7 @@ def parallel_kd_tree(action, memory, size):
         subspace_size = 1
     knn = KNeighborsRegressor(n_neighbors=min(agent.k, subspace_size), weights=duplicate_weights, n_jobs=1)
     knn.fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
-    pickle.dump(knn, open('knn_{}'.format(action), 'wb'))
     return knn
-
-
-def parallel_expected_values(action, scene):
-    return pickle.load(open('knn_{}'.format(action), 'rb')).predict([scene])[0]
 
 
 def parallel_duplicates(mem, memory):
