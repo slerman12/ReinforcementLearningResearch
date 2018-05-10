@@ -32,9 +32,9 @@ scale = 10000.0
 sigma = 0.001
 min_size = 1
 epoch = 5
-max_run_through_length = 10000000
+max_run_through_length = 1000000
 episode_length = 250
-trace_length = 500
+trace_length = 250
 state_space = objects * 5
 
 # Environment
@@ -122,8 +122,8 @@ if __name__ == "__main__":
             scene = agent.see(state)
 
             # Show segmentation
-            if t > 150:
-                agent.vision.plot()
+            # if t > 150:
+            #     agent.vision.plot()
 
             # Measure performance
             see_times += [agent.timer]

@@ -137,9 +137,17 @@ class Memories:
             # Increment duplicates counter
             self.num_duplicates += 1
 
-            # Reconcile duplicate by using max value TODO: Update other attributes as well
-            self.memories[duplicate_index, value_index] = max(self.memories[duplicate_index, value_index],
-                                                              memory[value_index])
+            # Pair of duplicates
+            duplicates = [self.memories[duplicate_index], memory]
+
+            # Reconcile duplicate by using one with max value
+            chosen = duplicates[int(np.argmax([dup[value_index] for dup in duplicates]))]
+
+            # Reconcile duplicate TODO: Update other attributes as well
+            self.memories[duplicate_index, value_index] = chosen[value_index]
+
+            # Set time accessed
+            self.set_time_accessed(self.memories[duplicate_index])
 
     def retrieve(self, experience, k):
         # Retrieve k most similar memories

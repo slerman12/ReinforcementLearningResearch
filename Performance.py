@@ -15,7 +15,7 @@ class Performance:
         self.reset()
 
         # Create file
-        pd.DataFrame(data=self.metrics).to_csv('Data/{}.csv'.format(self.filename), index=False, columns=self.metric_names)
+        pd.DataFrame(data=self.metrics).to_csv('Data/{}.csv'.format(filename), index=False, columns=metric_names)
 
     def reset(self):
         # Empty metrics variable
