@@ -45,10 +45,124 @@ class Progress:
 
 
 class Memory:
+    def __init__(self, memories, state, action, reward):
+        self.state = state
+        self.action = action
+        self.reward = reward
+        self.memories = memories
+        self.memory_pointer = None
+        self.array = None
+
+    def set_memory_pointer(self, index):
+        self.memory_pointer = index
+
+    def get_array(self):
+        return self.memories.memories_array[self.memory_pointer]
+
+
+class Memories:
+    def __init__(self, capacity, width):
+        # Number of memories
+        self.length = 0
+
+        # Perception of time
+        self.time = 0
+
+        # Max capacity to be stored
+        self.capacity = capacity
+
+        # Dimensions per individual memory
+        self.width = width
+
+        # Memory objects
+        self.memories = []
+
+        # Memory array
+        self.memories_array = np.zeros(self.capacity, self.width)
+
+    def store(self, memory):
+        # If duplicate
+        if memory.is_duplicate():
+            # Reconcile duplicates
+            memory.reconcile_duplicates()
+        else:
+            # If memory capacity has been reached
+            if self.is_capacity_reached():
+                # Replace least recently accessed memory with new memory
+                self.get_least_recently_accessed_memory().replace_with(memory)
+            else:
+                # Add memory
+                self.add_to_memories(memory)
+
+        # Update time
+        self.increment_time()
+
+    def retrieve(self, index):
+        # Retrieve memory and update access time
+        memory = self.memories[index]
+        memory.set_access_time(self.time)
+        return memory
+
+    def get_array(self):
+        # Return memories array
+        return self.memories_array[:self.length]
+
+    def add_to_memories(self, memory):
+        # Set pointers
+        memory.set_memories_pointer(self.length)
+
+        # Append memory
+        self.memories.append(memory)
+        self.memories_array[self.length] = memory.get_array()
+
+        # Update length
+        self.length += 1
+
+    def is_capacity_reached(self):
+        # Check if length exceeds capacity
+        return self.length >= self.capacity
+
+    def get_least_recently_accessed_memory(self):
+        # Return memory with the smallest value for access time
+        index = np.argmin(self.get_array()[TIME_INDEX])
+        return self.retrieve(index)
+
+    def increment_time(self):
+        # Increment internal clock
+        self.time += 0.01
+
+
+class Hippocampus:
+    def __init__(self, size, short_term_horizon, long_term_horizon):
+        self.size = size
+        self.long_term_horizon = long_term_horizon
+        self.short_term_horizon = short_term_horizon
+
+    class ShortTerm:
+        def __init__(self, short_term_horizon, size):
+            self.pointer = 0
+            self.short_term_horizon = short_term_horizon
+            self.size = size
+
+            self.memory_array = np.zeros(self.short_term_horizon, self.size)
+
+        def store(self, memory):
+            assert(self.pointer < self.short_term_horizon)
+            self.memory_array[self.pointer] = memory.get_array()
+            self.pointer += 1
+
+        def update(self):
+
+
+
+    def add(self, experience):
+
+
+
+class Memory:
     length = 0
     knn = {}
-    remove = np.array([])
-    duplicates = 0
+    duplicates = []
 
     def __init__(self, memory_size, memory_horizon):
         self.memory_size = memory_size
@@ -75,13 +189,8 @@ class Memory:
         else:
             self.length += 1
 
-    def Reset(self):
-        self.memory = np.zeros((1, self.memory_size))
-        self.length = 1
-        self.remove = np.array([])
-
     # Merge and clear
-    def Merge(self, m, reward_discount):
+    def Learn(self, m, reward_discount, k, actions):
         # Dynamic programming using Bellman equation to computes values (temporally discounted rewards) in linear time
         m.memory[0, VALUE_INDEX] = m.memory[0, REWARD_INDEX]
         for i in range(1, m.length):
@@ -124,8 +233,6 @@ class Memory:
             self.memory = self.memory[:-(self.length - self.memory_horizon), :]
             self.length = self.memory_horizon
 
-    # Merge and clear
-    def Learn(self, k, actions):
         # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
         def duplicate_weights(dist):
             for i, point_dist in enumerate(dist):
@@ -143,8 +250,13 @@ class Memory:
                 subspace = np.zeros((1, self.memory_size))
                 subspace_size = 1
             self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
-                                                   n_jobs=-1)
+                                                   n_jobs=1)
             self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+
+    def Reset(self):
+        self.memory = np.zeros((1, self.memory_size))
+        self.length = 1
+        self.remove = np.array([])
 
 
 class Agent:
@@ -181,11 +293,9 @@ class Agent:
     def Learn(self, scene, action, reward, expected):
         self.local_memory.Add(scene, action, reward, expected)
 
-    def Finish_Merge(self):
+    def Finish(self):
         self.global_memory.Merge(self.local_memory, self.gamma)
         self.local_memory.Reset()
-
-    def Finish_Learn(self):
         self.global_memory.Learn(self.k, self.actions)
 
 
@@ -436,34 +546,27 @@ if __name__ == "__main__":
         model_times = 0
         act_times = 0
         learn_times = 0
-
         run_through_start = time.time()
 
         # Initialize environment
         s = env.reset()
 
         for t in range(episode_length):
-            state_start = time.time()
-
             # Display environment
             # if run_through > 400:
             #     env.render()
 
             start = time.time()
-
             # Get scene from model
             # sc = agent.Model(s)
             sc = s
-
             end = time.time()
             model_times += end - start
 
             start = time.time()
-
             # Likelihood of picking a random action
             agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
             a, e = agent.Act(scene=sc)
-
             end = time.time()
             act_times += end - start
 
@@ -472,39 +575,22 @@ if __name__ == "__main__":
             rewards += r
 
             start = time.time()
-
             # Learn from the reward
             agent.Learn(sc, a, r, e)
-
             end = time.time()
             learn_times += end - start
-
-            state_end = time.time()
 
             # Break at end of run-through
             if done:
                 break
 
         start = time.time()
-
-        # Update temporally discounted rewards and dump run-through's memories into global memory
-        agent.Finish_Merge()
-
-        # Build kNN tree, etc.
-        agent.Finish_Learn()
-
+        # Update temporally discounted rewards and dump run-through's memories into global memory. Build kNN tree, etc.
+        agent.Finish()
         end = time.time()
         finish_time = end - start
-        epoch_finish_times.append(finish_time)
-
-        epoch_rewards.append(rewards)
-        epoch_model_times.append(model_times)
-        epoch_act_times.append(act_times)
-        epoch_learn_times.append(learn_times)
-
         run_through_end = time.time()
-        epoch_run_through_times.append(run_through_end - run_through_start)
-        
+
         metrics['episode'].append(run_through)
         metrics['memory_size'].append(hippocampus.length)
         metrics['model_time'].append(model_times)
@@ -518,27 +604,21 @@ if __name__ == "__main__":
             prog.update_progress()
 
         if not run_through % epoch:
-            filename_suffix = "automatic_sklearn_parallel"
+            filename_suffix = "Main"
             filename = "Env_{}_Date_{}_{}".format(env_name, datetime.datetime.today().strftime('%m_%d_%y'), filename_suffix)
             if run_through > 0:
-                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
+                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(metrics['reward'][-epoch:])))
                 print("* {} memories stored".format(agent.global_memory.length))
                 print("* {} duplicates".format(agent.global_memory.duplicates))
                 print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.gamma, agent.epsilon))
-                print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
-                print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
-                print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
-                print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
-                print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
+                print("* Mean modeling time per run-through: {}".format(np.mean(metrics['model_time'][-epoch:])))
+                print("* Mean acting time per run-through: {}".format(np.mean(metrics['act_time'][-epoch:])))
+                print("* Mean learning time per run-through: {}".format(np.mean(metrics['learn_time'][-epoch:])))
+                print("* Mean finishing time per run-through: {}".format(np.mean(metrics['finish_time'][-epoch:])))
+                print("* Mean run-through time: {}\n".format(np.mean(metrics['episode_time'][-epoch:])))
             else:
                 pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv('Data/{}.csv'.format(filename), index=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
-            
-            epoch_rewards = []
-            epoch_model_times = []
-            epoch_act_times = []
-            epoch_learn_times = []
-            epoch_finish_times = []
-            epoch_run_through_times = []
+
             with open('Data/{}.csv'.format(filename), 'a') as data_file:
                 pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv(data_file, index=False, header=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
             metrics = {'episode': [], 'memory_size': [], 'model_time': [], 'act_time': [],

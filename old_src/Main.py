@@ -11,7 +11,7 @@ import sys
 from sklearn import random_projection
 from sklearn.neighbors import KNeighborsRegressor, NearestNeighbors
 from skimage.measure import regionprops
-from skimage.segmentation import felzenszwalb
+from skimage.segmentation import felzenszwalb, slic
 from skimage.segmentation import mark_boundaries
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -77,11 +77,12 @@ class Memory:
 
     def Reset(self):
         self.memory = np.zeros((1, self.memory_size))
-        self.length = 1
+        self.length = 0
         self.remove = np.array([])
 
     # Merge and clear
     def Merge(self, m, reward_discount):
+        st = time.time()
         # Dynamic programming using Bellman equation to computes values (temporally discounted rewards) in linear time
         m.memory[0, VALUE_INDEX] = m.memory[0, REWARD_INDEX]
         for i in range(1, m.length):
@@ -93,19 +94,19 @@ class Memory:
         duplicates = []
 
         # This is very slow -- huge bottleneck (can do some of the work while iterating to compute distances instead!)
-        for mem in m.memory:
-            try:
-                # This in particular is likely the cause
-                duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
-                self.duplicates += 1
-
-                if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
-                    mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
-                    mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
-
-                duplicates.append(duplicate)
-            except IndexError:
-                pass
+        # for mem in m.memory:
+        #     try:
+        #         # This in particular is likely the cause
+        #         duplicate = np.argwhere(np.equal(self.memory[:, :ACTION_INDEX + 1], mem[:ACTION_INDEX + 1]).all(1))[0]
+        #         self.duplicates += 1
+        #
+        #         if self.memory[duplicate, VALUE_INDEX] > mem[VALUE_INDEX]:
+        #             mem[REWARD_INDEX] = self.memory[duplicate, REWARD_INDEX]
+        #             mem[VALUE_INDEX] = self.memory[duplicate, VALUE_INDEX]
+        #
+        #         duplicates.append(duplicate)
+        #     except IndexError:
+        #         pass
 
         if len(duplicates) > 0:
             self.memory = np.delete(self.memory, duplicates, axis=0)
@@ -124,8 +125,11 @@ class Memory:
             self.memory = self.memory[:-(self.length - self.memory_horizon), :]
             self.length = self.memory_horizon
 
+        en = time.time()
+
     # Merge and clear
     def Learn(self, k, actions):
+        st = time.time()
         # Custom weight s.t. duplicate state decides ("distance" parameter does that too but weighs inversely otherwise)
         def duplicate_weights(dist):
             for i, point_dist in enumerate(dist):
@@ -142,9 +146,14 @@ class Memory:
             if subspace_size == 0:
                 subspace = np.zeros((1, self.memory_size))
                 subspace_size = 1
+
+            st2 = time.time()
             self.knn[action] = KNeighborsRegressor(n_neighbors=min(k, subspace_size), weights=duplicate_weights,
-                                                   n_jobs=-1)
+                                                   n_jobs=1)
             self.knn[action].fit(subspace[:, :-NUM_ATTRIBUTES], subspace[:, VALUE_INDEX])
+            en2 = time.time()
+
+        en = time.time()
 
 
 class Agent:
@@ -181,11 +190,9 @@ class Agent:
     def Learn(self, scene, action, reward, expected):
         self.local_memory.Add(scene, action, reward, expected)
 
-    def Finish_Merge(self):
+    def Finish(self):
         self.global_memory.Merge(self.local_memory, self.gamma)
         self.local_memory.Reset()
-
-    def Finish_Learn(self):
         self.global_memory.Learn(self.k, self.actions)
 
 
@@ -231,7 +238,8 @@ class Felsenszwalb:
         previous = None
 
         def array(self):
-            return np.ndarray((1, 5), buffer=np.array([self.area, self.x, self.y, self.trajectory_x, self.trajectory_y]))
+            return np.ndarray((1, 5),
+                              buffer=np.array([self.area, self.x, self.y, self.trajectory_x, self.trajectory_y]))
 
         def __eq__(self, another):
             # Might be good to not include 'previous' attribute
@@ -245,7 +253,7 @@ class Felsenszwalb:
 
         def add(self, o):
             self.objects.append(o)
-            assert self.objects == sorted(self.objects, key=lambda x: x.index)
+            # assert self.objects == sorted(self.objects, key=lambda x: x.index)
             self.length += 1
 
             if self.array is None:
@@ -280,61 +288,87 @@ class Felsenszwalb:
             return scene.flatten()
 
         def prev_objects(self):
-            likely_pairs = NearestNeighbors(n_neighbors=1)
-            likely_pairs.fit(self.previous.array[:, :3])
+            if self.array is not None and self.previous.array is not None:
+                likely_pairs = NearestNeighbors(n_neighbors=1)
+                likely_pairs.fit(self.previous.array[:, :3])
 
-            graph = likely_pairs.kneighbors_graph(self.array[:, :3], mode="distance").toarray()
+                # nn = likely_pairs.kneighbors(self.array[:, :3], return_distance=False)
+                #
+                # for i in range(self.length):
+                #     self.objects[i].previous = self.previous.objects[nn[i, 0]]
+                #     self.objects[i].trajectory_x = round(self.objects[i].x - self.objects[i].previous.x)
+                #     self.objects[i].trajectory_y = round(self.objects[i].y - self.objects[i].previous.y)
+                #
+                #     self.array[i, 3] = self.objects[i].trajectory_x
+                #     self.array[i, 4] = self.objects[i].trajectory_y
 
-            for _ in range(max(self.length, self.previous.length)):
+                graph = likely_pairs.kneighbors_graph(self.array[:, :3], mode="distance").toarray()
 
-                x, y = np.unravel_index(np.argmin(graph, axis=None), graph.shape)
+                for _ in range(max(self.length, self.previous.length)):
 
-                self.objects[x].previous = self.previous.objects[y]
+                    x, y = np.unravel_index(np.argmin(graph, axis=None), graph.shape)
 
-                self.objects[x].trajectory_x = round(self.objects[x].x - self.objects[x].previous.x)
-                self.objects[x].trajectory_y = round(self.objects[x].y - self.objects[x].previous.y)
+                    self.objects[x].previous = self.previous.objects[y]
 
-                self.array[x, 3] = self.objects[x].trajectory_x
-                self.array[x, 4] = self.objects[x].trajectory_y
+                    self.objects[x].trajectory_x = round(self.objects[x].x - self.objects[x].previous.x)
+                    self.objects[x].trajectory_y = round(self.objects[x].y - self.objects[x].previous.y)
 
-                graph[x, :] = np.inf
-                graph[:, y] = np.inf
+                    self.array[x, 3] = self.objects[x].trajectory_x
+                    self.array[x, 4] = self.objects[x].trajectory_y
 
-                if np.isinf(graph).all():
-                    break
+                    graph[x, :] = np.inf
+                    graph[:, y] = np.inf
 
-    def __init__(self, object_capacity, size=None, greyscale=False):
+                    if np.isinf(graph).all():
+                        break
+
+    def __init__(self, object_capacity, size=None, greyscale=False, crop=None, scale=3.0, sigma=0.1, min_size=1):
         self.object_capacity = object_capacity
         self.property_capacity = 5
         self.state = None
         self.segments = None
         self.size = size
         self.grayscale = greyscale
+        self.crop = crop
+        self.scale = scale
+        self.sigma = sigma
+        self.min_size = min_size
 
         if self.object_capacity is not None and self.property_capacity is not None:
             self.state_space = self.object_capacity * self.property_capacity
 
         self.model = self.Model()
 
-    def Update(self, state, scale=3.0, sigma=0.1, min_size=1):
+    def Update(self, state):
         self.state = state
 
         # Greyscale
         if self.grayscale:
             self.state = np.dot(state[..., :3], [0.299, 0.587, 0.114])
 
+        # Crop top of image
+        if self.crop is not None:
+            height = self.state.shape[0]
+            width = self.state.shape[1]
+            self.state = self.state[self.crop[0]:(height - self.crop[1]), self.crop[3]:(width - self.crop[2])]
+
         # Image resize
         if self.size is not None:
-            self.state = cv2.resize(state, dsize=self.size)
+            self.state = cv2.resize(self.state, dsize=self.size)
 
         # Segmentation
-        self.segments = felzenszwalb(self.state, scale=scale, sigma=sigma, min_size=min_size)
+        # st = time.time()
+        self.segments = felzenszwalb(self.state, scale=self.scale, sigma=self.sigma, min_size=self.min_size)
+        # en = time.time()
+        # print("Segmentation time: {}".format(en - st))
+
+        # st = time.time()
 
         props = regionprops(self.segments)
 
         # print(len(props))
 
-        # Can maybe speed up by only updating changed objects
+        # Can maybe speed up by only updating changed objects  TODO: Maintain arrays to avoid redundant building
         for obj in range(len(props)):
             o = self.Object()
 
@@ -352,11 +386,14 @@ class Felsenszwalb:
         # self.model.finish()
         # return scene
 
-        self.model.prev_objects()
+        self.model.prev_objects()  # TODO: Make more efficient w/ 1-NN and marking those connected
 
         scene = self.model.scene(self.object_capacity, self.property_capacity)
 
         self.model.finish()
+
+        # en = time.time()
+        # print("Latter time: {}".format(en - st))
 
         return scene
 
@@ -392,21 +429,38 @@ if __name__ == "__main__":
     objects = None
     properties = None
     state_space = env.observation_space.shape[0]
+    epoch = 100
+    episode_length = 200
 
     # Environment
     # env_name = 'Pong-v0'
     # env = gym.make(env_name)
     # action_space = np.arange(env.action_space.n)
-    # objects = 12
+    # objects = 3
+    # scene_crop = [35, 18, 0, 0]
+    # scene_size = (80, 80)
+    # scene_scale = 10000.0
+    # scene_sigma = 0.001
+    # scene_min_size = 1
+    # epoch = 100
+    # episode_length = 250
 
     # Environment
     # env_name = 'SpaceInvaders-v0'
     # env = gym.make(env_name)
     # action_space = np.arange(env.action_space.n)
-    # objects = 160
+    # objects = 44
+    scene_crop = [20, 15, 0, 0]
+    scene_size = (80, 80)
+    scene_scale = 10000.0
+    scene_sigma = 0.001
+    scene_min_size = 1
+    # epoch = 100
+    # episode_length = 500
 
-    # Visual model
-    occipital = Felsenszwalb(objects)
+    # Visual model TODO: Figure out why time increasing - could be bc of multiple processes
+    occipital = Felsenszwalb(objects, scale=scene_scale, sigma=scene_sigma, min_size=scene_min_size,
+                             crop=scene_crop, size=scene_size)
     # occipital = RandomProjection(64, None, True, True)
     occipital.state_space = state_space
 
@@ -416,9 +470,6 @@ if __name__ == "__main__":
 
     # Agent
     agent = Agent(occipital, hippocampus, action_space, local_memory_horizon=1000, gamma=0.999, epsilon=1, k=50)
-
-    epoch = 100
-    episode_length = 250
 
     # Initialize metric variables for measuring performance
     metrics = {'episode': [], 'memory_size': [], 'model_time': [], 'act_time': [],
@@ -431,39 +482,36 @@ if __name__ == "__main__":
     epoch_run_through_times = []
     prog = None
 
+    # Initialize environment
+    s = env.reset()
+
     for run_through in range(10000):
         rewards = 0
         model_times = 0
         act_times = 0
         learn_times = 0
-
         run_through_start = time.time()
 
-        # Initialize environment
-        s = env.reset()
+        s = env.reset()  # Comment out
 
         for t in range(episode_length):
-            state_start = time.time()
-
             # Display environment
             # if run_through > 400:
-            #     env.render()
+            # env.render()
 
             start = time.time()
-
             # Get scene from model
             # sc = agent.Model(s)
+            # if t > 150:
+            #     agent.model.Show()
             sc = s
-
             end = time.time()
             model_times += end - start
 
             start = time.time()
-
             # Likelihood of picking a random action
             agent.epsilon = max(min(100000 / (run_through + 1) ** 3, 1), 0.001)
             a, e = agent.Act(scene=sc)
-
             end = time.time()
             act_times += end - start
 
@@ -472,39 +520,24 @@ if __name__ == "__main__":
             rewards += r
 
             start = time.time()
-
             # Learn from the reward
             agent.Learn(sc, a, r, e)
-
             end = time.time()
             learn_times += end - start
 
-            state_end = time.time()
-
             # Break at end of run-through
             if done:
+                # Initialize environment
+                # s = env.reset()  # Mark terminal state for rewards
                 break
 
         start = time.time()
-
-        # Update temporally discounted rewards and dump run-through's memories into global memory
-        agent.Finish_Merge()
-
-        # Build kNN tree, etc.
-        agent.Finish_Learn()
-
+        # Update temporally discounted rewards and dump run-through's memories into global memory. Build kNN tree, etc.
+        agent.Finish()
         end = time.time()
         finish_time = end - start
-        epoch_finish_times.append(finish_time)
-
-        epoch_rewards.append(rewards)
-        epoch_model_times.append(model_times)
-        epoch_act_times.append(act_times)
-        epoch_learn_times.append(learn_times)
-
         run_through_end = time.time()
-        epoch_run_through_times.append(run_through_end - run_through_start)
-        
+
         metrics['episode'].append(run_through)
         metrics['memory_size'].append(hippocampus.length)
         metrics['model_time'].append(model_times)
@@ -518,29 +551,37 @@ if __name__ == "__main__":
             prog.update_progress()
 
         if not run_through % epoch:
-            filename_suffix = "automatic_sklearn_parallel"
-            filename = "Env_{}_Date_{}_{}".format(env_name, datetime.datetime.today().strftime('%m_%d_%y'), filename_suffix)
+            filename_suffix = "Main"
+            filename = "Env_{}_Date_{}_{}".format(env_name, datetime.datetime.today().strftime('%m_%d_%y'),
+                                                  filename_suffix)
             if run_through > 0:
-                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch, np.mean(epoch_rewards)))
+                print("Epoch {}, last {} run-through reward average: {}".format(run_through / epoch, epoch,
+                                                                                np.mean(metrics['reward'][-epoch:])))
                 print("* {} memories stored".format(agent.global_memory.length))
-                print("* {} duplicates".format(agent.global_memory.duplicates))
+                # print("* {} duplicates".format(agent.global_memory.duplicates))
                 print("* K is {}, r discount {}, exploration {}".format(agent.k, agent.gamma, agent.epsilon))
-                print("* Mean modeling time per run-through: {}".format(np.mean(epoch_model_times)))
-                print("* Mean acting time per run-through: {}".format(np.mean(epoch_act_times)))
-                print("* Mean learning time per run-through: {}".format(np.mean(epoch_learn_times)))
-                print("* Mean finishing time per run-through: {}".format(np.mean(epoch_finish_times)))
-                print("* Mean run-through time: {}\n".format(np.mean(epoch_run_through_times)))
+                print("* Mean modeling time per run-through: {}".format(np.mean(metrics['model_time'][-epoch:])))
+                print("* Mean acting time per run-through: {}".format(np.mean(metrics['act_time'][-epoch:])))
+                print("* Mean learning time per run-through: {}".format(np.mean(metrics['learn_time'][-epoch:])))
+                print("* Mean finishing time per run-through: {}".format(np.mean(metrics['finish_time'][-epoch:])))
+                print("* Mean run-through time: {}\n".format(np.mean(metrics['episode_time'][-epoch:])))
             else:
-                pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv('Data/{}.csv'.format(filename), index=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
-            
-            epoch_rewards = []
-            epoch_model_times = []
-            epoch_act_times = []
-            epoch_learn_times = []
-            epoch_finish_times = []
-            epoch_run_through_times = []
+                pd.DataFrame(data=metrics,
+                             columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time',
+                                      'episode_time', 'reward']).to_csv('Data/{}.csv'.format(filename), index=False,
+                                                                        columns=['episode', 'memory_size', 'model_time',
+                                                                                 'act_time', 'learn_time',
+                                                                                 'finish_time', 'episode_time',
+                                                                                 'reward'])
+
             with open('Data/{}.csv'.format(filename), 'a') as data_file:
-                pd.DataFrame(data=metrics, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward']).to_csv(data_file, index=False, header=False, columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time', 'episode_time', 'reward'])
+                pd.DataFrame(data=metrics,
+                             columns=['episode', 'memory_size', 'model_time', 'act_time', 'learn_time', 'finish_time',
+                                      'episode_time', 'reward']).to_csv(data_file, index=False, header=False,
+                                                                        columns=['episode', 'memory_size', 'model_time',
+                                                                                 'act_time', 'learn_time',
+                                                                                 'finish_time', 'episode_time',
+                                                                                 'reward'])
             metrics = {'episode': [], 'memory_size': [], 'model_time': [], 'act_time': [],
                        'learn_time': [], 'finish_time': [], 'episode_time': [], 'reward': []}
 

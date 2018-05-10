@@ -612,7 +612,7 @@ class Felsenszwalb:
 
         self.model.finish()
 
-        return scene, use_relation, self.important_object.array(), self.relation.array()
+        return scene, use_relation, self.important_object.get_array(), self.relation.get_array()
 
     def Show(self):
         if self.state is not None and self.segments is not None:
