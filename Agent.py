@@ -106,7 +106,7 @@ class Agent:
         # Start timing
         start_time = time.time()
 
-        # Attribute data
+        # Attribute data TODO: make each attribute, including state, a unique array in a dict
         num_attributes = self.attribute_indices["num_attributes"]
         action_index = self.attribute_indices["action"]
         reward_index = self.attribute_indices["reward"]
