@@ -38,15 +38,16 @@ class Progress:
 
 
 # Environment
-# env_name = 'CartPole-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = None
-# properties = None
-# state_space = env.observation_space.shape[0]
-# epoch = 100
-# episode_length = 200
-# trace_length = 200
+env_name = 'CartPole-v0'
+env = gym.make(env_name)
+action_space = np.arange(env.action_space.n)
+objects = None
+properties = None
+state_space = env.observation_space.shape[0]
+epoch = 100
+episode_length = 200
+trace_length = 200
+vision = None
 
 # Environment
 # env_name = 'Pong-v0'
@@ -59,24 +60,24 @@ class Progress:
 # scene_sigma = 0.001
 # scene_min_size = 1
 # epoch = 100
-# episode_length = 200
+# episode_length = 250
 # trace_length = 500
 # state_space = objects * 5
 
 # Environment
-env_name = 'SpaceInvaders-v0'
-env = gym.make(env_name)
-action_space = np.arange(env.action_space.n)
-objects = 44
-scene_crop = [20, 15, 0, 0]
-scene_size = (80, 80)
-scene_scale = 10000.0
-scene_sigma = 0.001
-scene_min_size = 1
-epoch = 100
-episode_length = 200
-trace_length = 500
-state_space = objects * 5
+# env_name = 'SpaceInvaders-v0'
+# env = gym.make(env_name)
+# action_space = np.arange(env.action_space.n)
+# objects = 44
+# scene_crop = [20, 15, 0, 0]
+# scene_size = (80, 80)
+# scene_scale = 10000.0
+# scene_sigma = 0.001
+# scene_min_size = 1
+# epoch = 100
+# episode_length = 250
+# trace_length = 500
+# state_space = objects * 5
 
 # Attributes
 attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "expected": -4, "duplicate": -3,
@@ -86,19 +87,20 @@ attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "exp
 memory_width = state_space + attributes["num_attributes"]
 
 # Initialize metrics for measuring performance
-metrics = {'episode': [], 'memory_size': [], 'num_duplicates': [], 'see_time': [], 'act_time': [],
+metrics = {'episode': [], 'memory_size': [], 'num_duplicates': [], 'k': [], 'gamma': [], 'epsilon': [],
+           'episode_length': [], 'trace_length': [], 'see_time': [], 'act_time': [],
            'experience_time': [], 'learn_time': [], 'episode_time': [], 'reward': []}
 
 # Initialize progress variable
 progress = None
 
 # Visual model
-vision = Vision(object_capacity=objects, params=[scene_scale, scene_sigma, scene_min_size],
-                crop=scene_crop, size=scene_size)
+# vision = Vision(object_capacity=objects, params=[scene_scale, scene_sigma, scene_min_size],
+#                 crop=scene_crop, size=scene_size)
 # vision = RandomProjection(64, None, True, True)
 
 # Memories
-long_term_memory = [Memories(capacity=1000000, width=memory_width, attributes=attributes) for _ in action_space]
+long_term_memory = [Memories(capacity=400000, width=memory_width, attributes=attributes) for _ in action_space]
 short_term_memory = [Memories(capacity=episode_length, width=memory_width, attributes=attributes) for _ in action_space]
 
 # Reward traces
@@ -116,7 +118,7 @@ if __name__ == "__main__":
     t = 0
 
     # Train in batches of episodes
-    for episode in range(10000):
+    for episode in range(100000):
         # Performance metrics
         rewards = 0
         see_times = 0
@@ -181,6 +183,11 @@ if __name__ == "__main__":
         metrics['episode'].append(episode)
         metrics['memory_size'].append(sum([long_term_memory[action].length for action in action_space]))
         metrics["num_duplicates"].append(sum([long_term_memory[action].num_duplicates for action in action_space]))
+        metrics["k"].append(agent.k)
+        metrics["gamma"].append(traces.gamma)
+        metrics["epsilon"].append(round(agent.epsilon, 3))
+        metrics["episode_length"].append(episode_length)
+        metrics["trace_length"].append(trace_length)
         metrics['see_time'].append(see_times)
         metrics['act_time'].append(act_times)
         metrics['experience_time'].append(experience_times)
@@ -195,9 +202,9 @@ if __name__ == "__main__":
         # Print and output performance metrics for epoch
         if not episode % epoch:
             # File name
-            filename_suffix = "Run"
-            filename = "Env_{}_Date_{}_{}".format(env_name, datetime.datetime.today().strftime('%m_%d_%y'),
-                                                  filename_suffix)
+            filename_prefix = "Run"
+            filename = "{}_Env_{}_Date_{}".format(filename_prefix, env_name,
+                                                  datetime.datetime.today().strftime('%m_%d_%y'))
 
             # Create file if first episode, else append metrics to existing file
             if episode > 0:
@@ -207,7 +214,7 @@ if __name__ == "__main__":
                 print("* {} memories stored".format(metrics['memory_size'][-1]))
                 print("* {} duplicates".format(metrics['num_duplicates'][-1]))
                 print("* k is {}, gamma is {}, epsilon is {}, episode length is {}, trace length is {}".format(
-                    agent.k, traces.gamma, agent.epsilon, episode_length, trace_length))
+                    agent.k, traces.gamma, round(agent.epsilon, 3), episode_length, trace_length))
                 print("* mean seeing time per episode: {}".format(np.mean(metrics['see_time'][-epoch:])))
                 print("* mean acting time per episode: {}".format(np.mean(metrics['act_time'][-epoch:])))
                 print("* mean experiencing time per episode: {}".format(np.mean(metrics['experience_time'][-epoch:])))
@@ -217,20 +224,21 @@ if __name__ == "__main__":
                 # Append metrics to existing file
                 with open('Data/{}.csv'.format(filename), 'a') as data_file:
                     pd.DataFrame(data=metrics).to_csv(data_file, index=False, header=False,
-                                                      columns=['episode', 'memory_size', 'num_duplicates', 'see_time',
-                                                               'act_time', 'experience_time',
-                                                               'learn_time', 'episode_time',
-                                                               'reward'])
+                                                      columns=['episode', 'memory_size', 'num_duplicates', 'k', 'gamma',
+                                                               'epsilon', 'episode_length', 'trace_length', 'see_time',
+                                                               'act_time', 'experience_time', 'learn_time',
+                                                               'episode_time', 'reward'])
             else:
                 # Create file
                 pd.DataFrame(data=metrics).to_csv('Data/{}.csv'.format(filename), index=False,
-                                                  columns=['episode', 'memory_size', 'num_duplicates', 'see_time',
-                                                           'act_time', 'experience_time',
-                                                           'learn_time', 'episode_time',
+                                                  columns=['episode', 'memory_size', 'num_duplicates', 'k', 'gamma',
+                                                           'epsilon', 'episode_length', 'trace_length', 'see_time',
+                                                           'act_time', 'experience_time', 'learn_time', 'episode_time',
                                                            'reward'])
 
             # Reset metrics
-            metrics = {'episode': [], 'memory_size': [], 'num_duplicates': [], 'see_time': [], 'act_time': [],
+            metrics = {'episode': [], 'memory_size': [], 'num_duplicates': [], 'k': [], 'gamma': [], 'epsilon': [],
+                       'episode_length': [], 'trace_length': [], 'see_time': [], 'act_time': [],
                        'experience_time': [], 'learn_time': [], 'episode_time': [], 'reward': []}
 
             # Initiate progress
