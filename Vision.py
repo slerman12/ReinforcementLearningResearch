@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from skimage.measure import regionprops
+from skimage.measure import regionprops, label
 from skimage.segmentation import felzenszwalb, mark_boundaries
 from sklearn import random_projection
 from sklearn.neighbors.kd_tree import KDTree
@@ -11,14 +11,16 @@ class Vision:
     # State
     state = None
 
-    # Segments
+    # Segments and their properties
     segments = None
-
-    # Number of objects in the current state
+    properties = None
     num_objects = 0
 
-    # Number of objects in teh previous state
+    # Prior segments
+    prev_segments = None
+    prev_properties = None
     prev_num_objects = 0
+    linked = None
 
     def __init__(self, object_capacity, size=None, greyscale=False, crop=None, params=None):
         # Objects in the current state
@@ -59,16 +61,20 @@ class Vision:
             self.state = cv2.resize(self.state, dsize=self.size)
 
         # Set previous scene to current scene
-        self.prev_scene = self.scene
+        if self.num_objects > 0:
+            self.prev_scene = self.scene.copy()
+            self.prev_segments = self.segments.copy()
+            self.prev_properties = self.properties.copy()
+            self.prev_num_objects = self.num_objects
 
         # Segmentation
         self.segments = felzenszwalb(self.state, scale=self.params[0], sigma=self.params[1], min_size=self.params[2])
 
         # Properties for each segment
-        properties = regionprops(self.segments)
+        self.properties = regionprops(self.segments)
 
         # Number of objects
-        self.num_objects = len(properties)
+        self.num_objects = len(self.properties)
 
         # If more segments than space
         if self.num_objects > self.object_capacity:
@@ -78,59 +84,86 @@ class Vision:
 
         # Add objects to scene
         for obj in range(self.num_objects):
-            self.scene[obj, 0] = round(properties[obj].area)
-            self.scene[obj, 1] = round(properties[obj].centroid[0])
-            self.scene[obj, 2] = round(properties[obj].centroid[1])
+            self.scene[obj, 0] = round(self.properties[obj].area)
+            self.scene[obj, 1] = round(self.properties[obj].centroid[0])
+            self.scene[obj, 2] = round(self.properties[obj].centroid[1])
 
         # Compute trajectories
         self.compute_trajectories()
+        # print(self.prev_scene)
+        # print(self.scene)
+        # print()
 
         # Return flattened scene
         return self.scene.flatten()
 
     def compute_trajectories(self):
-        # Indices of previous objects that have been linked to and respective distances
-        linked = np.full((self.num_objects, 2), -1)
+        # If there were previous objects
+        if self.prev_num_objects > 0:
+            # Indices of previous objects that have been linked to and respective distances
+            self.linked = np.full((self.num_objects, 2), -1)
 
-        # Build KD tree for nearest neighbors on the previous scene
-        tree = KDTree(self.prev_scene[:, :-2], leaf_size=2)
+            # Build KD tree for nearest neighbors on the previous scene TODO: can include trajectories
+            tree = KDTree(self.prev_scene[:self.prev_num_objects, :-2], leaf_size=2)
 
-        # Most similar objects
-        dist, ind = tree.query(self.scene[:, :-2], k=1)
+            # Most similar objects
+            dist, ind = tree.query(self.scene[:self.num_objects, :-2], k=1)
 
-        # Uniquely link current objects to closest objects of the previous scene
-        for obj in range(self.num_objects):
-            # Check if already linked
-            prior_link = np.where(linked[:, 0] == ind[obj])[0]
+            # Uniquely link current objects to closest objects of the previous scene
+            for obj in range(self.num_objects):
+                # Set index and distance
+                index = ind[obj][0]
+                distance = dist[obj][0]
 
-            # Link closest pair
-            if prior_link.size > 0:
-                # If closer than prior pair
-                if dist < linked[prior_link, 1]:
-                    # Unlink prior pair
-                    linked[prior_link, 0] = -1
-                    self.scene[prior_link, -2] = 0
-                    self.scene[prior_link, -1] = 0
+                # Check if already linked
+                prior_link = np.where(self.linked[:, 0] == index)[0]
 
+                # Link closest pair
+                if prior_link.size > 0:
+                    # Set prior link
+                    prior_link = int(prior_link)
+
+                    # If closer than prior pair
+                    if distance < self.linked[prior_link, 1]:
+                        # Unlink prior pair
+                        self.linked[prior_link, 0] = -1
+                        self.scene[prior_link, -2] = 0
+                        self.scene[prior_link, -1] = 0
+
+                        # Link this pair
+                        self.linked[obj, 0] = index
+                        self.linked[obj, 1] = distance
+                        self.scene[obj, -2] = self.scene[obj, 1] - self.prev_scene[index, 1]
+                        self.scene[obj, -1] = self.scene[obj, 2] - self.prev_scene[index, 2]
+                else:
                     # Link this pair
-                    linked[obj, 0] = ind[obj]
-                    linked[obj, 1] = dist[obj]
-                    self.scene[obj, -2] = self.scene[obj, 1] - self.prev_scene[ind[obj], 1]
-                    self.scene[obj, -1] = self.scene[obj, 2] - self.prev_scene[ind[obj], 2]
-            else:
-                # Link this pair
-                linked[obj, 0] = ind[obj]
-                linked[obj, 1] = dist[obj]
-                self.scene[obj, -2] = self.scene[obj, 1] - self.prev_scene[ind[obj], 1]
-                self.scene[obj, -1] = self.scene[obj, 2] - self.prev_scene[ind[obj], 2]
+                    self.linked[obj, 0] = index
+                    self.linked[obj, 1] = distance
+                    self.scene[obj, -2] = self.scene[obj, 1] - self.prev_scene[index, 1]
+                    self.scene[obj, -1] = self.scene[obj, 2] - self.prev_scene[index, 2]
 
     def plot(self):
         # If state and segments have been set
         if self.state is not None and self.segments is not None:
+            # Plot trajectories
+            linked_priors = np.zeros(self.segments.shape)
+            for i, link in enumerate(self.linked):
+                if link[0] > -1:
+                    # print(self.scene[i], self.prev_scene[link[0]])
+                    for coord in self.prev_properties[link[0]].coords:
+                        linked_priors[coord[0], coord[1]] = 1
+
+            linked_priors = label(linked_priors)
+
             # Show segments
             figure = plt.figure("Segments")
-            ax = figure.add_subplot(1, 1, 1)
-            ax.imshow(mark_boundaries(self.state, self.segments))
+            figure.add_subplot(1, 3, 3)
+            plt.imshow(mark_boundaries(self.state, linked_priors))
+            figure.add_subplot(1, 3, 2)
+            plt.imshow(self.state)
+            figure.add_subplot(1, 3, 1)
+            plt.imshow(mark_boundaries(self.state, self.segments))
+            plt.text(10, -2, 'Number of segments: {}'.format(self.num_objects))
             plt.axis("off")
 
             # Plot
@@ -141,7 +174,7 @@ class Vision:
 class RandomProjection:
     # Initialize projection
     projection = None
-    
+
     def __init__(self, dimension, flatten=False, size=None, greyscale=False, crop=None):
         # Initialize variables
         self.dimension = dimension
@@ -150,7 +183,7 @@ class RandomProjection:
         self.crop = crop
         self.flatten = flatten
 
-    def update(self, state):
+    def see(self, state):
         # Greyscale
         if self.greyscale:
             state = np.dot(state[..., :3], [0.299, 0.587, 0.114])

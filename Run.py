@@ -9,44 +9,44 @@ import time
 import datetime
 
 # Environment
-env_name = 'CartPole-v0'
-env = gym.make(env_name)
-action_space = np.arange(env.action_space.n)
-objects = None
-properties = None
-state_space = env.observation_space.shape[0]
-episode_length = 200
-max_run_through_length = 200
-trace_length = 200
-vision = None
-epoch = 100
-
-# Environment
-# env_name = 'Pong-v0'
+# env_name = 'CartPole-v0'
 # env = gym.make(env_name)
 # action_space = np.arange(env.action_space.n)
-# objects = 3
-# scene_crop = [35, 18, 0, 0]
-# scene_size = (80, 80)
-# scene_scale = 10000.0
-# scene_sigma = 0.001
-# scene_min_size = 1
-# epoch = 1
-# max_run_through_length = 10000000
-# episode_length = 250
-# trace_length = 500
-# state_space = objects * 5
+# objects = None
+# properties = None
+# state_space = env.observation_space.shape[0]
+# episode_length = 200
+# max_run_through_length = 200
+# trace_length = 200
+# vision = None
+# epoch = 100
+
+# Environment
+env_name = 'Pong-v0'
+env = gym.make(env_name)
+action_space = np.arange(env.action_space.n)
+objects = 3
+crop = [35, 18, 0, 0]
+size = (80, 80)
+scale = 10000.0
+sigma = 0.001
+min_size = 1
+epoch = 5
+max_run_through_length = 10000000
+episode_length = 250
+trace_length = 500
+state_space = objects * 5
 
 # Environment
 # env_name = 'SpaceInvaders-v0'
 # env = gym.make(env_name)
 # action_space = np.arange(env.action_space.n)
 # objects = 44
-# scene_crop = [20, 15, 0, 0]
-# scene_size = (80, 80)
-# scene_scale = 10000.0
-# scene_sigma = 0.001
-# scene_min_size = 1
+# crop = [20, 15, 0, 0]
+# size = (80, 80)
+# scale = 10000.0
+# sigma = 0.001
+# min_size = 1
 # epoch = 1
 # max_run_through_length = 10000000
 # episode_length = 250
@@ -55,16 +55,20 @@ epoch = 100
 
 # File name
 filename_prefix = "Run"
-filename = "{}_Env_{}_Date_{}".format(filename_prefix, env_name,
-                                      datetime.datetime.today().strftime('%m_%d_%y'))
+filename = "{}_{}_{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'))
 
 # Initialize metrics for measuring performance
 performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size', 'Number of Duplicates',
-                           'K', 'Gamma', 'Epsilon', 'Episode Length', 'Trace Length', 'See Time', 'Act Time',
-                           'Experience Time', 'Learn Time', 'Episode Time', 'Reward'], filename)
+                           'K', 'Gamma', 'Epsilon', 'Episode Length', 'Trace Length', 'Mean See Time', 'Mean Act Time',
+                           'Mean Experience Time', 'Mean Learn Time', 'Mean Episode Time', 'Reward'], filename)
 
 # Initialize progress variable
 progress = Progress(0, epoch, "Epoch", True)
+
+# Visual model
+vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size)
+# vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
+# state_space = 64
 
 # Attributes
 attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "expected": -4, "duplicate": -3,
@@ -72,10 +76,6 @@ attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "exp
 
 # Memory width
 memory_width = state_space + attributes["num_attributes"]
-
-# Visual model
-# vision = Vision(object_capacity=objects, params=[scene_scale, scene_sigma, scene_min_size],
-#                 crop=scene_crop, size=scene_size)
 
 # Memories
 long_term_memory = [Memories(capacity=1000000, width=memory_width, attributes=attributes) for _ in action_space]
@@ -98,11 +98,11 @@ if __name__ == "__main__":
     t = 0
     done = False
     rewards = 0
-    see_times = 0
-    act_times = 0
-    experience_times = 0
-    learn_times = 0
-    episode_times = 0
+    see_times = []
+    act_times = []
+    experience_times = []
+    learn_times = []
+    episode_times = []
 
     # Train in batches of episodes
     for episode in range(100000):
@@ -115,18 +115,18 @@ if __name__ == "__main__":
             t += 1
 
             # Display environment
-            # if 10 < t < 500:
+            # if run_through > 5:
             #     env.render()
 
             # Get scene from visual model
             scene = agent.see(state)
 
             # Show segmentation
-            # if t > 150:
-            #     agent.model.plot()
+            if t > 150:
+                agent.vision.plot()
 
             # Measure performance
-            see_times += agent.timer
+            see_times += [agent.timer]
 
             # Set likelihood of picking a random action
             agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
@@ -135,7 +135,7 @@ if __name__ == "__main__":
             action, expected, duplicate = agent.act(scene=scene)
 
             # Measure performance
-            act_times += agent.timer
+            act_times += [agent.timer]
 
             # Transition
             state, reward, done, _ = env.step(action)
@@ -150,7 +150,7 @@ if __name__ == "__main__":
             agent.experience(scene, action, reward, expected, duplicate, done)
 
             # Measure performance
-            experience_times += agent.timer
+            experience_times += [agent.timer]
 
             # Break at end of run-through
             if done:
@@ -161,8 +161,8 @@ if __name__ == "__main__":
         agent.learn()
 
         # Measure performance
-        learn_times += agent.timer
-        episode_times += time.time() - episode_start
+        learn_times += [agent.timer]
+        episode_times += [time.time() - episode_start]
 
         # Output and reset performance measures at the end of a run-through
         if done:
@@ -173,13 +173,14 @@ if __name__ == "__main__":
             progress.update_progress()
 
             # Measure performance
-            metrics = {'Run-Through': run_through, 'Episode': episode+1, 'State': num_states, 'Number of Steps': t,
+            metrics = {'Run-Through': run_through, 'Episode': episode + 1, 'State': num_states, 'Number of Steps': t,
                        'Memory Size': sum([long_term_memory[a].length for a in action_space]),
                        'Number of Duplicates': sum([long_term_memory[a].num_duplicates for a in action_space]),
                        "K": agent.k, "Gamma": traces.gamma, "Epsilon": round(agent.epsilon, 3),
-                       'Episode Length': episode_length, 'Trace Length': trace_length, 'See Time': see_times,
-                       'Act Time': act_times, 'Experience Time': experience_times,  'Learn Time': learn_times,
-                       'Episode Time': episode_times, 'Reward': rewards}
+                       'Episode Length': episode_length, 'Trace Length': trace_length,
+                       'Mean See Time': np.mean(see_times), 'Mean Act Time': np.mean(act_times),
+                       'Mean Experience Time': np.mean(experience_times), 'Mean Learn Time': np.mean(learn_times),
+                       'Mean Episode Time': np.mean(episode_times), 'Reward': rewards}
             performance.measure_performance(metrics)
 
             # End epoch
@@ -195,8 +196,8 @@ if __name__ == "__main__":
             state = env.reset()
             t = 0
             rewards = 0
-            see_times = 0
-            act_times = 0
-            experience_times = 0
-            learn_times = 0
-            episode_times = 0
+            see_times = []
+            act_times = []
+            experience_times = []
+            learn_times = []
+            episode_times = []
