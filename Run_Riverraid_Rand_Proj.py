@@ -38,20 +38,20 @@ import datetime
 # state_space = objects * 5
 
 # Environment
-# env_name = 'Riverraid-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 30
-# crop = [5, 50, 45, 45]
-# size = (40, 100)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 5
-# max_run_through_length = 1000000
-# episode_length = 250
-# trace_length = 250
-# state_space = objects * 5
+env_name = 'Riverraid-v0'
+env = gym.make(env_name)
+action_space = np.arange(env.action_space.n)
+objects = 30
+crop = [5, 50, 45, 45]
+size = (40, 100)
+scale = 10000.0
+sigma = 0.001
+min_size = 1
+epoch = 5
+max_run_through_length = 1000000
+episode_length = 250
+trace_length = 250
+state_space = objects * 5
 
 # Environment
 # env_name = 'Breakout-v0'
@@ -86,20 +86,20 @@ import datetime
 # state_space = objects * 5
 
 # Environment
-env_name = 'Bowling-v0'
-env = gym.make(env_name)
-action_space = np.arange(env.action_space.n)
-objects = 20
-crop = [110, 40, 0, 0]
-size = (100, 40)
-scale = 900
-sigma = 0.03
-min_size = 1
-epoch = 5
-max_run_through_length = 1000000
-episode_length = 250
-trace_length = 250
-state_space = objects * 5
+# env_name = 'Bowling-v0'
+# env = gym.make(env_name)
+# action_space = np.arange(env.action_space.n)
+# objects = 20
+# crop = [110, 40, 0, 0]
+# size = (100, 40)
+# scale = 900
+# sigma = 0.03
+# min_size = 1
+# epoch = 5
+# max_run_through_length = 1000000
+# episode_length = 250
+# trace_length = 250
+# state_space = objects * 5
 
 # Environment
 # env_name = 'MsPacman-v0'
@@ -118,7 +118,7 @@ state_space = objects * 5
 # state_space = objects * 5
 
 # File name
-filename_prefix = "Segmentation"
+filename_prefix = "Rand_Proj"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
@@ -131,9 +131,9 @@ performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps',
 progress = Progress(0, epoch, "Epoch", True)
 
 # Visual model
-vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size)
-# vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
-# state_space = 64
+# vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size)
+vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
+state_space = 64
 
 # Attributes
 attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "expected": -4, "duplicate": -3,

@@ -118,7 +118,7 @@ state_space = objects * 5
 # state_space = objects * 5
 
 # File name
-filename_prefix = "Segmentation"
+filename_prefix = "Rand_Proj"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
@@ -131,9 +131,9 @@ performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps',
 progress = Progress(0, epoch, "Epoch", True)
 
 # Visual model
-vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size)
-# vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
-# state_space = 64
+# vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size)
+vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
+state_space = 64
 
 # Attributes
 attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "expected": -4, "duplicate": -3,

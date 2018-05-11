@@ -80,8 +80,11 @@ class Vision:
         # If more segments than space
         if self.num_objects > self.object_capacity:
             # Use subset of objects
+            print("\nExceeded object capacity: {} objects".format(self.num_objects))
             self.num_objects = self.object_capacity
-            print("\nExceeded object capacity")
+
+        # Reset scene
+        self.scene = np.zeros((self.object_capacity, 5))
 
         # Add objects to scene
         for obj in range(self.num_objects):
@@ -163,7 +166,8 @@ class Vision:
             plt.imshow(self.state)
             figure.add_subplot(1, 3, 1)
             plt.imshow(mark_boundaries(self.state, self.segments))
-            plt.text(10, -2, 'Number of segments: {}'.format(self.num_objects))
+            plt.text(10, -2, 'Number of segments: {}, previous number: {}'.format(self.num_objects,
+                                                                                  self.prev_num_objects))
             plt.axis("off")
 
             # Plot

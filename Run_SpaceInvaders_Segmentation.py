@@ -70,36 +70,36 @@ import datetime
 # state_space = objects * 5
 
 # Environment
-# env_name = 'SpaceInvaders-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 44
-# crop = [20, 15, 0, 0]
-# size = (80, 80)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 3
-# max_run_through_length = 10000
-# episode_length = 250
-# trace_length = 250
-# state_space = objects * 5
-
-# Environment
-env_name = 'Bowling-v0'
+env_name = 'SpaceInvaders-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
-objects = 20
-crop = [110, 40, 0, 0]
-size = (100, 40)
-scale = 900
-sigma = 0.03
+objects = 44
+crop = [20, 15, 0, 0]
+size = (80, 80)
+scale = 10000.0
+sigma = 0.001
 min_size = 1
-epoch = 5
-max_run_through_length = 1000000
+epoch = 3
+max_run_through_length = 10000
 episode_length = 250
 trace_length = 250
 state_space = objects * 5
+
+# Environment
+# env_name = 'Bowling-v0'
+# env = gym.make(env_name)
+# action_space = np.arange(env.action_space.n)
+# objects = 20
+# crop = [110, 40, 0, 0]
+# size = (100, 40)
+# scale = 900
+# sigma = 0.03
+# min_size = 1
+# epoch = 5
+# max_run_through_length = 1000000
+# episode_length = 250
+# trace_length = 250
+# state_space = objects * 5
 
 # Environment
 # env_name = 'MsPacman-v0'
