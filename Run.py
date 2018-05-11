@@ -22,20 +22,20 @@ import datetime
 # epoch = 100
 
 # Environment
-env_name = 'Pong-v0'
-env = gym.make(env_name)
-action_space = np.arange(env.action_space.n)
-objects = 3
-crop = [35, 18, 0, 0]
-size = (80, 80)
-scale = 10000.0
-sigma = 0.001
-min_size = 1
-epoch = 5
-max_run_through_length = 1000000
-episode_length = 250
-trace_length = 250
-state_space = objects * 5
+# env_name = 'Pong-v0'
+# env = gym.make(env_name)
+# action_space = np.arange(env.action_space.n)
+# objects = 3
+# crop = [35, 18, 0, 0]
+# size = (80, 80)
+# scale = 10000.0
+# sigma = 0.001
+# min_size = 1
+# epoch = 5
+# max_run_through_length = 1000000
+# episode_length = 250
+# trace_length = 250
+# state_space = objects * 5
 
 # Environment
 # env_name = 'SpaceInvaders-v0'
@@ -52,6 +52,22 @@ state_space = objects * 5
 # episode_length = 250
 # trace_length = 250
 # state_space = objects * 5
+
+# Environment
+env_name = 'Bowling-v0'
+env = gym.make(env_name)
+action_space = np.arange(env.action_space.n)
+objects = 20
+crop = [110, 40, 0, 0]
+size = (100, 40)
+scale = 900
+sigma = 0.03
+min_size = 1
+epoch = 5
+max_run_through_length = 1000000
+episode_length = 250
+trace_length = 250
+state_space = objects * 5
 
 # File name
 filename_prefix = "Run"
@@ -79,7 +95,7 @@ attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "exp
 memory_width = state_space + attributes["num_attributes"]
 
 # Memories
-long_term_memory = [Memories(capacity=100000, width=memory_width, attributes=attributes) for _ in action_space]
+long_term_memory = [Memories(capacity=1000000, width=memory_width, attributes=attributes) for _ in action_space]
 short_term_memory = [Memories(capacity=episode_length, width=memory_width, attributes=attributes) for _ in action_space]
 
 # Reward traces
