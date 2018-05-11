@@ -64,7 +64,7 @@ class Vision:
         if self.num_objects > 0:
             self.prev_scene = self.scene.copy()
             # self.prev_segments = self.segments.copy()
-            self.prev_properties = self.properties.copy()
+            self.prev_properties = self.properties[:]
             self.prev_num_objects = self.num_objects
 
         # Segmentation

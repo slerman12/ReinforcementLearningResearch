@@ -47,13 +47,14 @@ class Traces:
         trace[value_index] = reward
 
         # Update values of existing traces except oldest
-        for i in range(1, self.length):
+        # for i in range(1, self.length):
+        for i in range(0, self.length):
             self.traces[i, value_index] += self.gamma ** (self.length - i) * reward
 
         # If memory capacity has not been reached
         if self.length < self.capacity:
             # Update oldest trace
-            self.traces[0, value_index] += self.gamma ** self.length * reward
+            # self.traces[0, value_index] += self.gamma ** self.length * reward
 
             # Add trace
             self.traces[self.length] = trace
@@ -68,7 +69,7 @@ class Traces:
             expected_index = self.attributes["expected"]
 
             # Update memory with off-policy prediction
-            memory[value_index] = self.gamma ** self.length * trace[expected_index]
+            # memory[value_index] = self.gamma ** self.length * trace[expected_index]
 
             # Add memory to long term memory
             # TODO: Since I'm not updating the KD tree at every step, it is possible for a duplicate to enter memory
