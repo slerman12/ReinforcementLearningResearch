@@ -31,7 +31,7 @@ class Performance:
         # Print metrics
         for key in self.metrics:
             print("* {}: {}".format(key, aggregation(self.metrics[key])))
-        print()
+        print("")
 
         # Output metrics to file
         with open('Data/{}.csv'.format(self.filename), 'a') as data_file:
