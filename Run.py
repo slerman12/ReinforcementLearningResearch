@@ -22,40 +22,41 @@ import datetime
 # epoch = 100
 
 # Environment
-env_name = 'Pong-v0'
-env = gym.make(env_name)
-action_space = np.arange(env.action_space.n)
-objects = 3
-crop = [35, 18, 0, 0]
-size = (80, 80)
-scale = 10000.0
-sigma = 0.001
-min_size = 1
-epoch = 5
-max_run_through_length = 1000000
-episode_length = 250
-trace_length = 250
-state_space = objects * 5
-
-# Environment
-# env_name = 'SpaceInvaders-v0'
+# env_name = 'Pong-v0'
 # env = gym.make(env_name)
 # action_space = np.arange(env.action_space.n)
-# objects = 44
-# crop = [20, 15, 0, 0]
+# objects = 3
+# crop = [35, 18, 0, 0]
 # size = (80, 80)
 # scale = 10000.0
 # sigma = 0.001
 # min_size = 1
-# epoch = 1
-# max_run_through_length = 10000000
+# epoch = 5
+# max_run_through_length = 1000000
 # episode_length = 250
-# trace_length = 500
+# trace_length = 250
 # state_space = objects * 5
+
+# Environment
+env_name = 'SpaceInvaders-v0'
+env = gym.make(env_name)
+action_space = np.arange(env.action_space.n)
+objects = 44
+crop = [20, 15, 0, 0]
+size = (80, 80)
+scale = 10000.0
+sigma = 0.001
+min_size = 1
+epoch = 3
+max_run_through_length = 10000
+episode_length = 250
+trace_length = 250
+state_space = objects * 5
 
 # File name
 filename_prefix = "Run"
-filename = "{}_{}_{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'))
+filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
+                                  datetime.datetime.now().strftime('%H_%M'))
 
 # Initialize metrics for measuring performance
 performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size', 'Number of Duplicates',

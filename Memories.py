@@ -1,4 +1,5 @@
 import numpy as np
+from pyflann.index import FLANN
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neighbors.kd_tree import KDTree
 
@@ -45,12 +46,15 @@ class Traces:
         # Initialize trace's value to reward
         trace[value_index] = reward
 
-        # Update values of existing traces
-        for i in range(self.length):
+        # Update values of existing traces except oldest
+        for i in range(1, self.length):
             self.traces[i, value_index] += self.gamma ** (self.length - i) * reward
 
         # If memory capacity has not been reached
         if self.length < self.capacity:
+            # Update oldest trace
+            self.traces[0, value_index] += self.gamma ** self.length * reward
+
             # Add trace
             self.traces[self.length] = trace
 
@@ -59,6 +63,12 @@ class Traces:
         else:
             # Oldest trace
             memory = self.traces[0]
+
+            # Expected value index
+            expected_index = self.attributes["expected"]
+
+            # Update memory with off-policy prediction
+            memory[value_index] = self.gamma ** self.length * trace[expected_index]
 
             # Add memory to long term memory
             # TODO: Since I'm not updating the KD tree at every step, it is possible for a duplicate to enter memory
@@ -152,6 +162,7 @@ class Memories:
     def retrieve(self, experience, k):
         # Retrieve k most similar memories
         dist, ind = self.tree.query([experience], k=min(k, self.length))
+        # ind, dist = self.tree.nn_index(experience.reshape(1, experience.shape[0]), min(k, self.length))
 
         # Update access times
         for i in ind:
@@ -175,6 +186,8 @@ class Memories:
 
             # Build tree of long term memories
             self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=400)
+            # self.tree = FLANN()
+            # self.tree.build_index(self.memories[:self.length, :-num_attributes])
             # self.tree = KNeighborsRegressor(n_neighbors=min(50, self.length))
             # self.tree.fit(self.memories[:self.length, :-num_attributes],
             #               self.memories[:self.length, self.attributes["value"]])

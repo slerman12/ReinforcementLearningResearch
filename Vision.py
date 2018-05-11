@@ -63,7 +63,7 @@ class Vision:
         # Set previous scene to current scene
         if self.num_objects > 0:
             self.prev_scene = self.scene.copy()
-            self.prev_segments = self.segments.copy()
+            # self.prev_segments = self.segments.copy()
             self.prev_properties = self.properties.copy()
             self.prev_num_objects = self.num_objects
 
@@ -152,7 +152,6 @@ class Vision:
                     # print(self.scene[i], self.prev_scene[link[0]])
                     for coord in self.prev_properties[link[0]].coords:
                         linked_priors[coord[0], coord[1]] = 1
-
             linked_priors = label(linked_priors)
 
             # Show segments
