@@ -188,7 +188,8 @@ class Memories:
             num_attributes = self.attributes["num_attributes"]
 
             # Build tree of long term memories
-            self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
+            # self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
+            self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=400)
             # self.tree = FLANN()
             # self.tree.build_index(self.memories[:self.length, :-num_attributes])
             # self.tree = KNeighborsRegressor(n_neighbors=min(50, self.length))
