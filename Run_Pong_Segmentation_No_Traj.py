@@ -22,28 +22,12 @@ import datetime
 # epoch = 100
 
 # Environment
-# env_name = 'Pong-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 3
-# crop = [35, 18, 0, 0]
-# size = (80, 80)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 5
-# max_run_through_length = 1000000
-# episode_length = 250
-# trace_length = 250
-# state_space = objects * 5
-
-# Environment
-env_name = 'Riverraid-v0'
+env_name = 'Pong-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
-objects = 30
-crop = [5, 50, 10, 10]
-size = (70, 90)
+objects = 3
+crop = [35, 18, 0, 0]
+size = (80, 80)
 scale = 10000.0
 sigma = 0.001
 min_size = 1
@@ -51,8 +35,25 @@ epoch = 5
 max_run_through_length = 1000000
 episode_length = 250
 trace_length = 250
-trajectory = True
+trajectory = False
 state_space = objects * 5 if trajectory else objects * 3
+
+# Environment
+# env_name = 'Riverraid-v0'
+# env = gym.make(env_name)
+# action_space = np.arange(env.action_space.n)
+# objects = 30
+# crop = [5, 50, 10, 10]
+# size = (70, 90)
+# scale = 10000.0
+# sigma = 0.001
+# min_size = 1
+# epoch = 5
+# max_run_through_length = 1000000
+# episode_length = 250
+# trace_length = 250
+# trajectory = True
+# state_space = objects * 5 if trajectory else objects * 3
 
 # Environment
 # env_name = 'Breakout-v0'

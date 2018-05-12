@@ -23,12 +23,12 @@ class Vision:
     prev_num_objects = 0
     linked = None
 
-    def __init__(self, object_capacity, size=None, greyscale=False, crop=None, params=None):
+    def __init__(self, object_capacity, size=None, greyscale=False, crop=None, params=None, trajectory=True):
         # Objects in the current state
-        self.scene = np.zeros((object_capacity, 5))
+        self.scene = np.zeros((object_capacity, 5 if trajectory else 3))
 
         # Objects in the previous state
-        self.prev_scene = np.zeros((object_capacity, 5))
+        self.prev_scene = np.zeros((object_capacity, 5 if trajectory else 3))
 
         # Max number of objects
         self.object_capacity = object_capacity
@@ -42,6 +42,9 @@ class Vision:
         if params is None:
             params = [3.0, 0.1, 1]
         self.params = params
+
+        # If trajectories
+        self.trajectory = trajectory
 
     def see(self, state):
         # Set state
@@ -84,7 +87,7 @@ class Vision:
             self.num_objects = self.object_capacity
 
         # Reset scene
-        self.scene = np.zeros((self.object_capacity, 5))
+        self.scene = np.zeros((self.object_capacity, 5 if self.trajectory else 3))
 
         # Add objects to scene
         for obj in range(self.num_objects):
@@ -93,10 +96,12 @@ class Vision:
             self.scene[obj, 2] = round(self.properties[obj].centroid[1])
 
         # Compute trajectories
-        self.compute_trajectories()
-        # print(self.prev_scene)
-        # print(self.scene)
-        # print()
+        if self.trajectory:
+            self.compute_trajectories()
+
+        print(self.prev_scene)
+        print(self.scene)
+        print()
 
         # Return flattened scene
         return self.scene.flatten()

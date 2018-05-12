@@ -51,7 +51,7 @@ epoch = 5
 max_run_through_length = 1000000
 episode_length = 250
 trace_length = 250
-trajectory = True
+trajectory = False
 state_space = objects * 5 if trajectory else objects * 3
 
 # Environment
