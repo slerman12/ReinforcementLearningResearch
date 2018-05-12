@@ -108,7 +108,7 @@ class Vision:
 
     def compute_trajectories(self):
         # If there were previous objects
-        if self.prev_num_objects > 0:
+        if self.prev_num_objects > 0 and self.num_objects > 0:
             # Indices of previous objects that have been linked to and respective distances
             self.linked = np.full((self.num_objects, 2), -1)
 
