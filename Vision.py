@@ -99,10 +99,6 @@ class Vision:
         if self.trajectory:
             self.compute_trajectories()
 
-        print(self.prev_scene)
-        print(self.scene)
-        print()
-
         # Return flattened scene
         return self.scene.flatten()
 
