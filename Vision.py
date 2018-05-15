@@ -99,6 +99,10 @@ class Vision:
         if self.trajectory:
             self.compute_trajectories()
 
+        # print(self.scene)
+        # print(self.prev_scene)
+        # print()
+
         # Return flattened scene
         return self.scene.flatten()
 
@@ -151,24 +155,32 @@ class Vision:
         # If state and segments have been set
         if self.state is not None and self.segments is not None:
             # Plot trajectories
+            # print(self.segments[0])
+            # print()
             linked_priors = np.zeros(self.segments.shape)
-            for i, link in enumerate(self.linked):
+            i = 0
+            for link in self.linked:
                 if link[0] > -1:
                     # print(self.scene[i], self.prev_scene[link[0]])
                     for coord in self.prev_properties[link[0]].coords:
-                        linked_priors[coord[0], coord[1]] = 1
+                        linked_priors[coord[0], coord[1]] = i + 1
+                    i += 1
             linked_priors = label(linked_priors)
 
             # Show segments
             figure = plt.figure("Segments")
             figure.add_subplot(1, 3, 3)
             plt.imshow(mark_boundaries(self.state, linked_priors))
+            plt.axis("off")
             figure.add_subplot(1, 3, 2)
             plt.imshow(self.state)
+            plt.axis("off")
             figure.add_subplot(1, 3, 1)
             plt.imshow(mark_boundaries(self.state, self.segments))
             plt.text(10, -2, 'Number of segments: {}, previous number: {}'.format(self.num_objects,
                                                                                   self.prev_num_objects))
+            # plt.text(10, -5, 'Previous number of segments: {}'.format(self.prev_num_objects))
+            # plt.text(10, -5, 'Number of segments: {}'.format(self.num_objects))
             plt.axis("off")
 
             # Plot

@@ -68,7 +68,7 @@ class Traces:
             memory = self.traces[0]
 
             # Expected value index
-            expected_index = self.attributes["expected"]
+            # expected_index = self.attributes["expected"]
 
             # Update memory with off-policy prediction
             # memory[value_index] = self.gamma ** self.length * trace[expected_index]

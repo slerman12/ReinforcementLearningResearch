@@ -65,13 +65,19 @@ class Agent:
                 # Similar memories
                 distances, indices = self.long_term_memory[action].retrieve(scene, self.k)
 
+                # Weights
+                weights = 0
+
                 # For each similar memory
                 for i in range(num_similar_memories):
                     # Value index
                     value_index = self.attribute_indices["value"]
 
+                    # Distance
+                    distance = distances[i]
+
                     # Note if duplicate and if so use its value
-                    if distances[i] == 0:
+                    if distance == 0:
                         # Note duplicate and action
                         duplicate[action] = indices[i]
 
@@ -79,12 +85,17 @@ class Agent:
                         expected = self.long_term_memory[action].memories[indices[i], value_index]
                         break
 
+                    # Weight of each memory is inverse of distance
+                    weight = 1 / (distance + 0.1)
+                    weights += weight
+
                     # Add to running sum of values
-                    expected += self.long_term_memory[action].memories[indices[i], value_index]
+                    expected += self.long_term_memory[action].memories[indices[i], value_index] * weight
 
                 # Finish computing expected value
                 if duplicate[action] < 0:
-                    expected /= num_similar_memories
+                    # expected /= num_similar_memories
+                    expected /= weights
                 # expected = self.long_term_memory[action].tree.predict([scene])[0]
 
             # Record expected value for this action
@@ -106,7 +117,7 @@ class Agent:
         # Start timing
         start_time = time.time()
 
-        # Attribute data TODO: make each attribute, including state, a unique array in a dict
+        # Attribute data
         num_attributes = self.attribute_indices["num_attributes"]
         action_index = self.attribute_indices["action"]
         reward_index = self.attribute_indices["reward"]

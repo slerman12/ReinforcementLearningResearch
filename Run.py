@@ -8,6 +8,7 @@ import gym
 import time
 import datetime
 
+# TODO: Make environment class
 # Environment
 # env_name = 'CartPole-v0'
 # env = gym.make(env_name)
@@ -22,21 +23,21 @@ import datetime
 # epoch = 100
 
 # Environment
-# env_name = 'Pong-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 3
-# crop = [35, 18, 0, 0]
-# size = (80, 80)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 5
-# max_run_through_length = 1000000
-# episode_length = 250
-# trace_length = 250
-# trajectory = True
-# state_space = objects * 5 if trajectory else objects * 3
+env_name = 'Pong-v0'
+env = gym.make(env_name)
+action_space = np.arange(env.action_space.n)
+objects = 3
+crop = [35, 18, 0, 0]
+size = (80, 80)
+scale = 10000.0
+sigma = 0.001
+min_size = 1
+epoch = 5
+max_run_through_length = 100000
+episode_length = 10000
+trace_length = 250
+trajectory = True
+state_space = objects * 5 if trajectory else objects * 3
 
 # Environment
 # env_name = 'Riverraid-v0'
@@ -69,7 +70,7 @@ import datetime
 # max_run_through_length = 1000000
 # episode_length = 250
 # trace_length = 250
-# trajectory = False
+# trajectory = True
 # state_space = objects * 5 if trajectory else objects * 3
 
 # Environment
@@ -86,25 +87,25 @@ import datetime
 # max_run_through_length = 10000
 # episode_length = 250
 # trace_length = 250
-# trajectory = False
+# trajectory = True
 # state_space = objects * 5 if trajectory else objects * 3
 
 # Environment
-env_name = 'Bowling-v0'
-env = gym.make(env_name)
-action_space = np.arange(env.action_space.n)
-objects = 20
-crop = [110, 40, 0, 0]
-size = (100, 40)
-scale = 900
-sigma = 0.03
-min_size = 1
-epoch = 5
-max_run_through_length = 1000000
-episode_length = 250
-trace_length = 250
-trajectory = False
-state_space = objects * 5 if trajectory else objects * 3
+# env_name = 'Bowling-v0'
+# env = gym.make(env_name)
+# action_space = np.arange(env.action_space.n)
+# objects = 20
+# crop = [110, 40, 0, 0]
+# size = (100, 40)
+# scale = 900
+# sigma = 0.03
+# min_size = 1
+# epoch = 5
+# max_run_through_length = 1000000
+# episode_length = 250
+# trace_length = 250
+# trajectory = False
+# state_space = objects * 5 if trajectory else objects * 3
 
 # Environment
 # env_name = 'MsPacman-v0'
@@ -122,6 +123,30 @@ state_space = objects * 5 if trajectory else objects * 3
 # trace_length = 250
 # state_space = objects * 5
 
+# Visual model TODO: add learn method for learning visual models with default function pass
+vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size, trajectory=trajectory)
+# vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
+# state_space = 64
+
+# Attributes TODO: replace
+attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "expected": -4, "duplicate": -3,
+              "time_accessed": -2, "terminal": -1}
+
+# Memory width TODO: replace
+memory_width = state_space + attributes["num_attributes"]
+
+# Memories TODO: add partitions to memory and separate attribute arrays in dict with default width 1
+long_term_memory = [Memories(capacity=400000, width=memory_width, attributes=attributes) for _ in action_space]
+short_term_memory = [Memories(capacity=episode_length, width=memory_width, attributes=attributes) for _ in action_space]
+
+# Reward traces
+traces = Traces(capacity=trace_length, width=memory_width, attributes=attributes, memories=short_term_memory,
+                gamma=0.999)
+
+# Agent TODO: add Memory Agent (policy-based memory rather than value) using overridden act method, dict for experience
+agent = Agent(vision=vision, long_term_memory=long_term_memory, short_term_memory=short_term_memory, traces=traces,
+              attributes=attributes, actions=action_space, epsilon=1, k=50)
+
 # File name
 filename_prefix = "Segmentation"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
@@ -132,32 +157,8 @@ performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps',
                            'K', 'Gamma', 'Epsilon', 'Episode Length', 'Trace Length', 'Mean See Time', 'Mean Act Time',
                            'Mean Experience Time', 'Mean Learn Time', 'Mean Episode Time', 'Reward'], filename)
 
-# Initialize progress variable
+# Initialize progress variable TODO: combine with performance
 progress = Progress(0, epoch, "Epoch", True)
-
-# Visual model
-vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size, trajectory=trajectory)
-# vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
-# state_space = 64
-
-# Attributes
-attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "expected": -4, "duplicate": -3,
-              "time_accessed": -2, "terminal": -1}
-
-# Memory width
-memory_width = state_space + attributes["num_attributes"]
-
-# Memories
-long_term_memory = [Memories(capacity=400000, width=memory_width, attributes=attributes) for _ in action_space]
-short_term_memory = [Memories(capacity=episode_length, width=memory_width, attributes=attributes) for _ in action_space]
-
-# Reward traces
-traces = Traces(capacity=trace_length, width=memory_width, attributes=attributes, memories=short_term_memory,
-                gamma=0.999)
-
-# Agent
-agent = Agent(vision=vision, long_term_memory=long_term_memory, short_term_memory=short_term_memory, traces=traces,
-              attributes=attributes, actions=action_space, epsilon=1, k=50)
 
 # Main method
 if __name__ == "__main__":
@@ -192,7 +193,7 @@ if __name__ == "__main__":
             scene = agent.see(state)
 
             # Show segmentation
-            # if t > 150:
+            # if t > 90:
             #     agent.vision.plot()
 
             # Measure performance
@@ -201,7 +202,7 @@ if __name__ == "__main__":
             # Set likelihood of picking a random action
             agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
 
-            # Get action
+            # Get action TODO: dict
             action, expected, duplicate = agent.act(scene=scene)
 
             # Measure performance
