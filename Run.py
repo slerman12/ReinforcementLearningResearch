@@ -34,7 +34,7 @@ sigma = 0.001
 min_size = 1
 epoch = 5
 max_run_through_length = 100000
-episode_length = 10000
+max_episode_length = 10000
 trace_length = 250
 trajectory = True
 state_space = objects * 5 if trajectory else objects * 3
@@ -137,7 +137,7 @@ memory_width = state_space + attributes["num_attributes"]
 
 # Memories TODO: add partitions to memory and separate attribute arrays in dict with default width 1
 long_term_memory = [Memories(capacity=400000, width=memory_width, attributes=attributes) for _ in action_space]
-short_term_memory = [Memories(capacity=episode_length, width=memory_width, attributes=attributes) for _ in action_space]
+short_term_memory = [Memories(capacity=max_episode_length, width=memory_width, attributes=attributes) for _ in action_space]
 
 # Reward traces
 traces = Traces(capacity=trace_length, width=memory_width, attributes=attributes, memories=short_term_memory,
@@ -154,7 +154,7 @@ filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.t
 
 # Initialize metrics for measuring performance
 performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size', 'Number of Duplicates',
-                           'K', 'Gamma', 'Epsilon', 'Episode Length', 'Trace Length', 'Mean See Time', 'Mean Act Time',
+                           'K', 'Gamma', 'Epsilon', 'Max Episode Length', 'Trace Length', 'Mean See Time', 'Mean Act Time',
                            'Mean Experience Time', 'Mean Learn Time', 'Mean Episode Time', 'Reward'], filename)
 
 # Initialize progress variable TODO: combine with performance
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         episode_start = time.time()
 
         # For every time step in episode
-        for _ in range(episode_length):
+        for _ in range(max_episode_length):
             # Increment step
             num_states += 1
             t += 1
@@ -248,7 +248,7 @@ if __name__ == "__main__":
                        'Memory Size': sum([long_term_memory[a].length for a in action_space]),
                        'Number of Duplicates': sum([long_term_memory[a].num_duplicates for a in action_space]),
                        "K": agent.k, "Gamma": traces.gamma, "Epsilon": round(agent.epsilon, 3),
-                       'Episode Length': episode_length, 'Trace Length': trace_length,
+                       'Max Episode Length': max_episode_length, 'Trace Length': trace_length,
                        'Mean See Time': np.mean(see_times), 'Mean Act Time': np.mean(act_times),
                        'Mean Experience Time': np.mean(experience_times), 'Mean Learn Time': np.mean(learn_times),
                        'Mean Episode Time': np.mean(episode_times), 'Reward': rewards}
@@ -257,6 +257,7 @@ if __name__ == "__main__":
             # End epoch
             if not run_through % epoch:
                 # Output performance
+                print(env_name)
                 print("Epoch: {}".format(run_through / epoch))
                 performance.output_performance()
 

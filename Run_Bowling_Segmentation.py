@@ -96,8 +96,8 @@ scale = 1
 sigma = 0.1
 min_size = 5
 epoch = 5
-max_run_through_length = 1000000
-episode_length = 250
+max_run_through_length = 100000
+episode_length = 10000
 trace_length = 250
 state_space = objects * 5
 
