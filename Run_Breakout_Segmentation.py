@@ -187,8 +187,8 @@ if __name__ == "__main__":
             scene = agent.see(state)
 
             # Show segmentation
-            if t > 150:
-                agent.vision.plot()
+            # if t > 150:
+            #     agent.vision.plot()
 
             # Measure performance
             see_times += [agent.timer]
