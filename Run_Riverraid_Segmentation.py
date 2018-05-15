@@ -43,10 +43,10 @@ env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
 objects = 30
 crop = [5, 50, 10, 10]
-size = (70, 90)
-scale = 10.0
-sigma = 0.001
-min_size = 1
+size = None
+scale = 1.0
+sigma = 0.1
+min_size = 8
 epoch = 5
 max_run_through_length = 1000000
 episode_length = 250
@@ -188,8 +188,8 @@ if __name__ == "__main__":
             scene = agent.see(state)
 
             # Show segmentation
-            # if t > 150:
-            #     agent.vision.plot()
+            if t > 150:
+                agent.vision.plot()
 
             # Measure performance
             see_times += [agent.timer]
