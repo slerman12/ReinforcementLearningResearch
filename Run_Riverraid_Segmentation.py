@@ -41,7 +41,7 @@ import datetime
 env_name = 'Riverraid-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
-objects = 35
+objects = 50
 crop = [5, 50, 10, 10]
 size = None
 scale = 1.0
@@ -119,7 +119,7 @@ state_space = objects * 5 if trajectory else objects * 3
 # state_space = objects * 5
 
 # File name
-filename_prefix = "Segmentation"
+filename_prefix = "Segmentation_no_resize_more_episodes_more_objects"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 

@@ -119,7 +119,7 @@ state_space = objects * 5
 # state_space = objects * 5
 
 # File name
-filename_prefix = "Segmentation"
+filename_prefix = "Segmentation_no_resize_more_episodes"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
