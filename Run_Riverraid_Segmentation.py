@@ -41,15 +41,15 @@ import datetime
 env_name = 'Riverraid-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
-objects = 50
+objects = 35
 crop = [5, 50, 10, 10]
 size = None
 scale = 1.0
 sigma = 0.1
 min_size = 5
 epoch = 5
-max_run_through_length = 1000000
-episode_length = 250
+max_run_through_length = 100000
+episode_length = 10000
 trace_length = 250
 trajectory = True
 state_space = objects * 5 if trajectory else objects * 3
@@ -188,8 +188,8 @@ if __name__ == "__main__":
             scene = agent.see(state)
 
             # Show segmentation
-            # if t > 150:
-            #     agent.vision.plot()
+            if t > 150:
+                agent.vision.plot()
 
             # Measure performance
             see_times += [agent.timer]
