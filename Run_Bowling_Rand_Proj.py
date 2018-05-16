@@ -91,13 +91,13 @@ env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
 objects = 20
 crop = [110, 40, 0, 0]
-size = (100, 40)
+size = None
 scale = 900
 sigma = 0.03
 min_size = 1
 epoch = 5
-max_run_through_length = 1000000
-episode_length = 250
+max_run_through_length = 100000
+episode_length = 10000
 trace_length = 250
 state_space = objects * 5
 
@@ -118,7 +118,7 @@ state_space = objects * 5
 # state_space = objects * 5
 
 # File name
-filename_prefix = "Rand_Proj"
+filename_prefix = "Rand_Proj_no_resize_more_episodes"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
