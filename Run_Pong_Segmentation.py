@@ -200,7 +200,7 @@ if __name__ == "__main__":
             see_times += [agent.timer]
 
             # Set likelihood of picking a random action
-            agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
+            agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.05)
 
             # Get action TODO: dict
             action, expected, duplicate = agent.act(scene=scene)
