@@ -67,6 +67,7 @@ epoch = 5
 max_run_through_length = 100000
 episode_length = 10000
 trace_length = 250
+trajectory = True
 state_space = objects * 5
 
 # Environment
@@ -118,7 +119,7 @@ state_space = objects * 5
 # state_space = objects * 5
 
 # File name
-filename_prefix = "Rand_Proj"
+filename_prefix = "Segmentation"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
