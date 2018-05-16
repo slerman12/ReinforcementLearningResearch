@@ -28,10 +28,10 @@ env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
 objects = 3
 crop = [35, 18, 0, 0]
-size = (80, 80)
-scale = 10000.0
-sigma = 0.001
-min_size = 1
+size = None
+scale = 1.0
+sigma = 0.1
+min_size = 5
 epoch = 5
 max_run_through_length = 100000
 episode_length = 250
@@ -200,7 +200,7 @@ if __name__ == "__main__":
             see_times += [agent.timer]
 
             # Set likelihood of picking a random action
-            agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.05)
+            agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
 
             # Get action TODO: dict
             action, expected, duplicate = agent.act(scene=scene)
