@@ -148,7 +148,7 @@ agent = Agent(vision=vision, long_term_memory=long_term_memory, short_term_memor
               attributes=attributes, actions=action_space, epsilon=1, k=50)
 
 # File name
-filename_prefix = "Segmentation_no_resize"
+filename_prefix = "Segmentation_no_resize_slower_epsilon"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
