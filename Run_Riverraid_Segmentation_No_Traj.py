@@ -43,10 +43,10 @@ env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
 objects = 30
 crop = [5, 50, 10, 10]
-size = (70, 90)
-scale = 10000.0
-sigma = 0.001
-min_size = 1
+size = None
+scale = 1
+sigma = 0.1
+min_size = 5
 epoch = 5
 max_run_through_length = 1000000
 episode_length = 250
@@ -119,7 +119,7 @@ state_space = objects * 5 if trajectory else objects * 3
 # state_space = objects * 5
 
 # File name
-filename_prefix = "Segmentation"
+filename_prefix = "Segmentation_no_traj_no_resize"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
