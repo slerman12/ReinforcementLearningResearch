@@ -90,12 +90,12 @@ class Agent:
                     weights += weight
 
                     # Add to running sum of values
-                    expected += self.long_term_memory[action].memories[indices[i], value_index]
+                    expected += self.long_term_memory[action].memories[indices[i], value_index] * weight
 
                 # Finish computing expected value
                 if duplicate[action] < 0:
                     # expected /= num_similar_memories
-                    expected /= num_similar_memories
+                    expected /= weights
                 # expected = self.long_term_memory[action].tree.predict([scene])[0]
 
             # Record expected value for this action
