@@ -41,7 +41,7 @@ import datetime
 env_name = 'Riverraid-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
-objects = 30
+objects = 35
 crop = [5, 50, 10, 10]
 size = None
 scale = 1
