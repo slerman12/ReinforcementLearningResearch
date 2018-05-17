@@ -149,7 +149,7 @@ crop = [40, 40, 32, 32]
 size = None
 scale = 1
 sigma = 0.1
-min_size = 20
+min_size = 250
 epoch = 5
 max_run_through_length = 100000
 max_episode_length = 10000
@@ -227,8 +227,8 @@ if __name__ == "__main__":
             scene = agent.see(state)
 
             # Show segmentation
-            # if t > 5:
-            #     agent.vision.plot()
+            if t > 90:
+                agent.vision.plot()
 
             # Measure performance
             see_times += [agent.timer]
