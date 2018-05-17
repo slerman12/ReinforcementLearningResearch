@@ -169,19 +169,19 @@ class Vision:
 
             # Show segments
             figure = plt.figure("Segments")
-            figure.add_subplot(1, 3, 3)
+            figure.add_subplot(1, 1, 1)
             plt.imshow(mark_boundaries(self.state, linked_priors))
             plt.axis("off")
-            figure.add_subplot(1, 3, 2)
-            plt.imshow(self.state)
-            plt.axis("off")
-            figure.add_subplot(1, 3, 1)
-            plt.imshow(mark_boundaries(self.state, self.segments))
-            plt.text(10, -2, 'Number of segments: {}, previous number: {}'.format(self.num_objects,
-                                                                                  self.prev_num_objects))
+            # figure.add_subplot(1, 2, 2)
+            # plt.imshow(self.state)
+            # plt.axis("off")
+            # figure.add_subplot(1, 1, 1)
+            # plt.imshow(mark_boundaries(self.state, self.segments))
+            # plt.text(10, -2, 'Number of segments: {}, previous number: {}'.format(self.num_objects,
+            #                                                                       self.prev_num_objects))
             # plt.text(10, -5, 'Previous number of segments: {}'.format(self.prev_num_objects))
-            # plt.text(10, -5, 'Number of segments: {}'.format(self.num_objects))
-            plt.axis("off")
+            # plt.text(0, -2, '{} segments'.format(self.num_objects))
+            # plt.axis("off")
 
             # Plot
             plt.show()

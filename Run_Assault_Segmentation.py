@@ -127,12 +127,12 @@ import datetime
 env_name = 'Assault-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
-objects = 30
+objects = 45
 crop = [50, 30, 0, 0]
 size = None
 scale = 1
 sigma = 0.1
-min_size = 10
+min_size = 3
 epoch = 5
 max_run_through_length = 100000
 max_episode_length = 10000
