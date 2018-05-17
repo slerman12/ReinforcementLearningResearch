@@ -155,7 +155,7 @@ max_run_through_length = 100000
 max_episode_length = 10000
 trace_length = 250
 trajectory = False
-state_space = objects * 5
+state_space = objects * 5 if trajectory else objects * 3
 
 # Visual model TODO: add learn method for learning visual models with default function pass
 vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size, trajectory=trajectory)
