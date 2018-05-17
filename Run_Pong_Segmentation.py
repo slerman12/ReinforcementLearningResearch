@@ -34,7 +34,7 @@ sigma = 0.1
 min_size = 5
 epoch = 5
 max_run_through_length = 100000
-episode_length = 250
+episode_length = 10000
 trace_length = 250
 trajectory = True
 state_space = objects * 5 if trajectory else objects * 3
@@ -148,7 +148,7 @@ agent = Agent(vision=vision, long_term_memory=long_term_memory, short_term_memor
               attributes=attributes, actions=action_space, epsilon=1, k=50)
 
 # File name
-filename_prefix = "Segmentation_no_resize"
+filename_prefix = "Segmentation_no_resize_more_episodes_faster_epsilon"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
@@ -200,7 +200,7 @@ if __name__ == "__main__":
             see_times += [agent.timer]
 
             # Set likelihood of picking a random action
-            agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
+            agent.epsilon = max(min(100000 / (episode + 1) ** 4, 1), 0.001)
 
             # Get action TODO: dict
             action, expected, duplicate = agent.act(scene=scene)
