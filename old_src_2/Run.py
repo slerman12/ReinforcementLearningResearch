@@ -1,23 +1,26 @@
 from __future__ import division
-from Performance import Performance, Progress
-from Vision import Vision, RandomProjection
-from Memories import Memories, Traces
-from Agent import Agent
+from old_src_2.Performance import Performance, Progress
+from old_src_2.Vision import Vision, RandomProjection
+from old_src_2.Memories import Memories, Traces
+from old_src_2.Agent import Agent
 import numpy as np
 import gym
 import time
 import datetime
 
+# TODO: Make environment class
 # Environment
 env_name = 'CartPole-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
+objects = None
+properties = None
 state_space = env.observation_space.shape[0]
 max_episode_length = 200
 max_run_through_length = 200
 trace_length = 200
-epoch = 100
 vision = None
+epoch = 100
 
 # Environment
 # env_name = 'Pong-v0'
@@ -120,23 +123,27 @@ vision = None
 # trace_length = 250
 # state_space = objects * 5
 
-# Visual model
+# Visual model TODO: add learn method for learning visual models with default function pass
 # vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size, trajectory=trajectory)
 # vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
 # state_space = 64
 
-# Attributes
-attributes = {"state": state_space, "action": 1, "reward": 1, "value": 1, "expected": 1, "duplicate": 1,
-              "time_accessed": 1, "terminal": 1}
+# Attributes TODO: replace
+attributes = {"num_attributes": 7, "action": -7, "reward": -6, "value": -5, "expected": -4, "duplicate": -3,
+              "time_accessed": -2, "terminal": -1}
 
-# Memories
-long_term_memory = [Memories(capacity=400000, attributes=attributes) for _ in action_space]
-short_term_memory = [Memories(capacity=max_episode_length, attributes=attributes) for _ in action_space]
+# Memory width TODO: replace
+memory_width = state_space + attributes["num_attributes"]
+
+# Memories TODO: add partitions to memory and separate attribute arrays in dict with default width 1
+long_term_memory = [Memories(capacity=400000, width=memory_width, attributes=attributes) for _ in action_space]
+short_term_memory = [Memories(capacity=max_episode_length, width=memory_width, attributes=attributes) for _ in action_space]
 
 # Reward traces
-traces = Traces(capacity=trace_length, attributes=attributes, memories=short_term_memory, gamma=0.999)
+traces = Traces(capacity=trace_length, width=memory_width, attributes=attributes, memories=short_term_memory,
+                gamma=0.999)
 
-# Agent TODO: add Memory Agent (policy-based memory rather than value) using overridden act method
+# Agent TODO: add Memory Agent (policy-based memory rather than value) using overridden act method, dict for experience
 agent = Agent(vision=vision, long_term_memory=long_term_memory, short_term_memory=short_term_memory, traces=traces,
               attributes=attributes, actions=action_space, epsilon=1, k=50)
 
@@ -195,7 +202,7 @@ if __name__ == "__main__":
             # Set likelihood of picking a random action
             agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
 
-            # Get action
+            # Get action TODO: dict
             action, expected, duplicate = agent.act(scene=scene)
 
             # Measure performance
@@ -210,12 +217,8 @@ if __name__ == "__main__":
             # Measure performance
             rewards += reward
 
-            # Experience
-            experience = {"state": scene, "action": action, "reward": reward, "value": None, "expected": expected,
-                          "duplicate": duplicate, "time_accessed": None, "terminal": done}
-
             # Observe the experience such that traces and short term memory are updated
-            agent.experience(experience)
+            agent.experience(scene, action, reward, expected, duplicate, done)
 
             # Measure performance
             experience_times += [agent.timer]
@@ -253,7 +256,7 @@ if __name__ == "__main__":
 
             # End epoch
             if not run_through % epoch:
-                # Output performance TODO: save models
+                # Output performance
                 print(env_name)
                 print("Epoch: {}".format(run_through / epoch))
                 performance.output_performance()

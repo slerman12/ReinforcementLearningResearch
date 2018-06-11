@@ -4,10 +4,10 @@ import numpy as np
 
 
 class Agent:
-    def __init__(self, vision, long_term_memory, short_term_memory, traces, attributes, actions, epsilon, k):
-        # For measuring performance
-        self.timer = 0
+    # For measuring performance
+    timer = 0
 
+    def __init__(self, vision, long_term_memory, short_term_memory, traces, attributes, actions, epsilon, k):
         # Visual model
         self.vision = vision
 
@@ -18,8 +18,8 @@ class Agent:
         # Traces
         self.traces = traces
 
-        # Attributes (such as state, reward, value, etc.)
-        self.attributes = attributes
+        # Indices of attributes (such as reward, value, etc.)
+        self.attribute_indices = attributes
 
         # Parameters
         self.actions = actions
@@ -70,6 +70,9 @@ class Agent:
 
                 # For each similar memory
                 for i in range(num_similar_memories):
+                    # Value index
+                    value_index = self.attribute_indices["value"]
+
                     # Distance
                     distance = distances[i]
 
@@ -79,7 +82,7 @@ class Agent:
                         duplicate[action] = indices[i]
 
                         # Use this value
-                        expected = self.long_term_memory[action].memories["value"][indices[i]]
+                        expected = self.long_term_memory[action].memories[indices[i], value_index]
                         break
 
                     # Weight of each memory is inverse of distance
@@ -87,13 +90,13 @@ class Agent:
                     weights += weight
 
                     # Add to running sum of values
-                    expected += self.long_term_memory[action].memories["value"][indices[i]] * weight
+                    expected += self.long_term_memory[action].memories[indices[i], value_index] * weight
 
                 # Finish computing expected value
                 if duplicate[action] < 0:
                     # expected /= num_similar_memories
                     expected /= weights
-                # expected = self.long_term_memory[action].tree.predict([scene])[0]
+                    # expected = self.long_term_memory[action].tree.predict([scene])[0]
 
             # Record expected value for this action
             expected_per_action[action] = expected
@@ -110,16 +113,28 @@ class Agent:
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
 
-    def experience(self, experience):
+    def experience(self, scene, action, reward, expected, duplicate, terminal):
         # Start timing
         start_time = time.time()
 
-        # Update visual model
-        if self.vision is not None:
-            self.vision.learn(experience)
+        # Attribute data
+        num_attributes = self.attribute_indices["num_attributes"]
+        action_index = self.attribute_indices["action"]
+        reward_index = self.attribute_indices["reward"]
+        expected_index = self.attribute_indices["expected"]
+        duplicate_index = self.attribute_indices["duplicate"]
+        terminal_index = self.attribute_indices["terminal"]
+
+        # Set attributes
+        attributes = np.zeros(num_attributes)
+        attributes[action_index] = action
+        attributes[reward_index] = reward
+        attributes[expected_index] = expected
+        attributes[duplicate_index] = duplicate
+        attributes[terminal_index] = terminal
 
         # Add trace
-        self.traces.add(experience)
+        self.traces.add(trace=np.append(scene, attributes))
 
         # Measure time
         self.timer = time.time() - start_time

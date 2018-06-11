@@ -9,21 +9,21 @@ import matplotlib.pyplot as plt
 
 
 class Vision:
+    # State
+    state = None
+
+    # Segments and their properties
+    segments = None
+    properties = None
+    num_objects = 0
+
+    # Prior segments
+    prev_segments = None
+    prev_properties = None
+    prev_num_objects = 0
+    linked = None
+
     def __init__(self, object_capacity, size=None, greyscale=False, crop=None, params=None, trajectory=True):
-        # State
-        self.state = None
-
-        # Segments and their properties
-        self.segments = None
-        self.properties = None
-        self.num_objects = 0
-
-        # Prior segments
-        self.prev_segments = None
-        self.prev_properties = None
-        self.prev_num_objects = 0
-        self.linked = None
-
         # Objects in the current state
         self.scene = np.zeros((object_capacity, 5 if trajectory else 3))
 
@@ -106,9 +106,6 @@ class Vision:
         # Return flattened scene
         return self.scene.flatten()
 
-    def learn(self, experience):
-        pass
-
     def compute_trajectories(self):
         # If there were previous objects
         if self.prev_num_objects > 0 and self.num_objects > 0:
@@ -174,7 +171,7 @@ class Vision:
             figure = plt.figure("Segments")
             figure.add_subplot(1, 1, 1)
             plt.imshow(mark_boundaries(self.state, linked_priors))
-            # plt.axis("off")
+            plt.axis("off")
             # figure.add_subplot(1, 2, 2)
             # plt.imshow(self.state)
             # plt.axis("off")
@@ -184,7 +181,7 @@ class Vision:
             #                                                                       self.prev_num_objects))
             # plt.text(10, -5, 'Previous number of segments: {}'.format(self.prev_num_objects))
             # plt.text(0, -2, '{} segments'.format(self.num_objects))
-            plt.axis("off")
+            # plt.axis("off")
 
             # Plot
             plt.show()
@@ -228,6 +225,3 @@ class RandomProjection:
 
         # Return embedded state
         return self.projection.transform([state])[0]
-
-    def learn(self, experience):
-        pass

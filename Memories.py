@@ -7,21 +7,25 @@ from sklearn.neighbors.kd_tree import KDTree
 
 
 class Traces:
-    def __init__(self, capacity, width, attributes, memories, gamma):
-        # Array of memory traces for calculating values from rewards
-        self.traces = np.zeros((capacity, width))
+    def __init__(self, capacity, attributes, memories, gamma):
+        # Initialize dict of traces
+        self.traces = {}
+
+        # Arrays of memory traces for calculating values from rewards
+        for attribute, dimensionality in attributes.items():
+            if dimensionality > 1:
+                self.traces[attribute] = np.zeros((capacity, dimensionality))
+            else:
+                self.traces[attribute] = np.zeros(capacity)
+
+        # Indices of attributes (such as reward, value, etc.)
+        self.attributes = attributes
 
         # Max number of memories
         self.capacity = capacity
 
-        # Dimensions per memory
-        self.width = width
-
         # Current number of memory traces
         self.length = 0
-
-        # Indices of attributes (such as reward, value, etc.)
-        self.attributes = attributes
 
         # Memories to store into
         self.memories = memories
@@ -30,28 +34,16 @@ class Traces:
         self.gamma = gamma
 
     def add(self, trace):
-        # Reward index
-        reward_index = self.attributes["reward"]
-
-        # Value index
-        value_index = self.attributes["value"]
-
-        # Action index
-        action_index = self.attributes["action"]
-
-        # Terminal index
-        terminal_index = self.attributes["terminal"]
-
         # Reward of trace
-        reward = trace[reward_index]
+        reward = trace["reward"]
 
         # Initialize trace's value to reward
-        trace[value_index] = reward
+        trace["value"] = reward
 
         # Update values of existing traces except oldest
         # for i in range(1, self.length):
         for i in range(0, self.length):
-            self.traces[i, value_index] += self.gamma ** (self.length - i) * reward
+            self.traces["value"][i] += self.gamma ** (self.length - i) * reward
 
         # If memory capacity has not been reached
         if self.length < self.capacity:
@@ -59,13 +51,14 @@ class Traces:
             # self.traces[0, value_index] += self.gamma ** self.length * reward
 
             # Add trace
-            self.traces[self.length] = trace
+            for attribute, dimensionality in self.attributes.items():
+                self.traces[attribute][self.length] = trace[attribute]
 
             # Update length
             self.length += 1
         else:
             # Oldest trace
-            memory = self.traces[0]
+            memory = self.get_trace_by_index(0)
 
             # Expected value index
             # expected_index = self.attributes["expected"]
@@ -75,101 +68,119 @@ class Traces:
 
             # Add memory to long term memory
             # TODO: Since I'm not updating the KD tree at every step, it is possible for a duplicate to enter memory
-            self.memories[int(memory[action_index])].store(memory)
+            self.memories[int(memory["action"])].store(memory)
 
-            # Pop memory from traces
-            self.traces[:-1] = self.traces[1:]
+            # Pop memory from traces and add
+            for attribute, dimensionality in self.attributes.items():
+                # Pop trace
+                self.traces[attribute][:-1] = self.traces[attribute][1:]
 
-            # Add trace
-            self.traces[self.length - 1] = trace
+                # Add trace
+                self.traces[attribute][self.length - 1] = trace[attribute]
 
         # If terminal state
-        if trace[terminal_index]:
+        if trace["terminal"]:
             # Dump all traces into memory
             for i in range(self.length):
-                trace = self.traces[i]
-                self.memories[int(trace[action_index])].store(trace)
+                trace = self.get_trace_by_index(i)
+                self.memories[int(trace["action"])].store(trace)
 
             # Reset traces
-            self.traces = np.zeros((self.capacity, self.width))
-            self.length = 0
+            self.reset()
+
+    def get_trace_by_index(self, index):
+        # Initialize memory
+        trace = {}
+
+        # Set memory
+        for attribute, dimensionality in self.attributes.items():
+            trace[attribute] = self.traces[attribute][index]
+
+        # Return memory
+        return trace
+
+    def reset(self):
+        # Reset internal states
+        self.length = 0
+        for attribute, dimensionality in self.attributes.items():
+            if dimensionality > 1:
+                self.traces[attribute] = np.zeros((self.capacity, dimensionality))
+            else:
+                self.traces[attribute] = np.zeros(self.capacity)
 
 
 class Memories:
-    # Internal perception of time
-    time = 0
+    def __init__(self, capacity, attributes):
+        # Initialize memories
+        self.memories = {}
 
-    # Consolidated memories
-    tree = None
+        # Arrays of memory
+        for attribute, dimensionality in attributes.items():
+            if dimensionality > 1:
+                self.memories[attribute] = np.zeros((capacity, dimensionality))
+            else:
+                self.memories[attribute] = np.zeros(capacity)
 
-    # Number of duplicates
-    num_duplicates = 0
-
-    def __init__(self, capacity, width, attributes):
-        # Array of long term memory
-        self.memories = np.zeros((capacity, width))
+        # Memory attributes (such as state, reward, value, etc.) and their dimensionality
+        self.attributes = attributes
 
         # Max number of memories
         self.capacity = capacity
 
-        # Dimensions per memory
-        self.width = width
-
         # Current number of memories
         self.length = 0
 
-        # Indices of attributes (such as reward, value, etc.)
-        self.attributes = attributes
+        # Consolidated memories
+        self.tree = None
+
+        # Internal perception of time
+        self.time = 0
+
+        # Number of duplicates
+        self.num_duplicates = 0
 
     def store(self, memory, check_duplicate=False):
         # Set time accessed to current time
         self.set_time_accessed(memory)
 
         # Duplicate index (positive if exists)
-        duplicate_index = int(memory[self.attributes["duplicate"]]) if check_duplicate else -1
-
-        # Value index
-        value_index = self.attributes["value"]
+        duplicate_index = int(memory["duplicate"]) if check_duplicate else -1
 
         # If not a duplicate
         if duplicate_index < 0:
             # If memory capacity has not been reached
             if self.length < self.capacity:
                 # Add memory
-                self.memories[self.length] = memory
+                for attribute, dimensionality in self.attributes.items():
+                    self.memories[attribute][self.length] = memory[attribute]
 
                 # Update length
                 self.length += 1
             else:
-                # Time last accessed index
-                time_accessed_index = self.attributes["time_accessed"]
-
                 # Replace least recently accessed memory with new memory
-                self.memories[np.argmin(self.memories[:self.length, time_accessed_index])] = memory
+                least_recently_accessed = np.argmin(self.memories["time_accessed"][:self.length])
+                for attribute, dimensionality in self.attributes.items():
+                    self.memories[attribute][least_recently_accessed] = memory[attribute]
         else:
             # Increment duplicates counter
             self.num_duplicates += 1
 
-            # Pair of duplicates
-            duplicates = [self.memories[duplicate_index], memory]
-
             # Reconcile duplicate by using one with max value
-            chosen = duplicates[int(np.argmax([dup[value_index] for dup in duplicates]))]
-
-            # Reconcile duplicate TODO: Update other attributes as well
-            self.memories[duplicate_index, value_index] = chosen[value_index]
+            if self.memories["value"][duplicate_index] < memory["value"]:
+                for attribute, dimensionality in self.attributes.items():
+                    self.memories[attribute][duplicate_index] = memory[attribute]
 
             # Set time accessed
-            self.set_time_accessed(self.memories[duplicate_index])
+            self.set_time_accessed(self.memories, duplicate_index)
 
     def retrieve(self, experience, k):
-        # Retrieve k most similar memories
+        # Retrieve k most similar memories #
         dist, ind = self.tree.query([experience], k=min(k, self.length))
         # ind, dist = self.tree.nn_index(experience.reshape(1, experience.shape[0]), min(k, self.length))
 
         # Update access times
-        for i in ind:
-            self.set_time_accessed(self.memories[i])
+        for i in ind[0]:
+            self.set_time_accessed(self.memories, i)
 
         # Return memories
         return dist[0], ind[0]
@@ -179,35 +190,47 @@ class Memories:
         if short_term_memories.length > 0:
             # Store short term memories
             for memory in range(short_term_memories.length):
-                self.store(short_term_memories.memories[memory], True)
+                self.store(short_term_memories.get_memory_by_index(memory), True)
 
             # Empty out short term memories
             short_term_memories.reset()
 
-            # Number of attributes
-            num_attributes = self.attributes["num_attributes"]
-
             # Build tree of long term memories
             # self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
-            self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=400)
+            self.tree = KDTree(self.memories["state"][:self.length], leaf_size=400)
             # self.tree = FLANN()
             # self.tree.build_index(self.memories[:self.length, :-num_attributes])
             # self.tree = KNeighborsRegressor(n_neighbors=min(50, self.length))
             # self.tree.fit(self.memories[:self.length, :-num_attributes],
             #               self.memories[:self.length, self.attributes["value"]])
 
-    def set_time_accessed(self, memory):
-        # Time of last access index
-        time_accessed_index = self.attributes["time_accessed"]
-
+    def set_time_accessed(self, memory, index=None):
         # Set time of access
-        memory[time_accessed_index] = self.time
+        if index is None:
+            memory["time_accessed"] = self.time
+        else:
+            memory["time_accessed"][int(index)] = self.time
 
         # Increment time
         self.time += 0.1
+
+    def get_memory_by_index(self, index):
+        # Initialize memory
+        memory = {}
+
+        # Set memory
+        for attribute, dimensionality in self.attributes.items():
+            memory[attribute] = self.memories[attribute][index]
+
+        # Return memory
+        return memory
         
     def reset(self):
         # Reset internal states
         self.tree = None
         self.length = 0
-        self.memories = np.zeros((self.capacity, self.width))
+        for attribute, dimensionality in self.attributes.items():
+            if dimensionality > 1:
+                self.memories[attribute] = np.zeros((self.capacity, dimensionality))
+            else:
+                self.memories[attribute] = np.zeros(self.capacity)
