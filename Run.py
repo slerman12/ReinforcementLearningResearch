@@ -2,7 +2,7 @@ from __future__ import division
 from Performance import Performance, Progress
 from Vision import Vision, RandomProjection
 from Memories import Memories, Traces
-from Agent import Agent
+from Agent import Agent, MFEC
 import numpy as np
 import gym
 import time
@@ -126,8 +126,8 @@ vision = None
 # state_space = 64
 
 # Attributes
-attributes = {"state": state_space, "action": 1, "reward": 1, "value": 1, "expected": 1, "duplicate": 1,
-              "time_accessed": 1, "terminal": 1}
+attributes = dict(state=state_space, action=1, reward=1, value=1, expected=1, duplicate=1, terminal=1, time_accessed=1,
+                  time=1)
 
 # Memories
 long_term_memory = [Memories(capacity=400000, attributes=attributes) for _ in action_space]
@@ -147,15 +147,16 @@ filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.t
 
 # Initialize metrics for measuring performance
 performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size', 'Number of Duplicates',
-                           'K', 'Gamma', 'Epsilon', 'Max Episode Length', 'Trace Length', 'Mean See Time', 'Mean Act Time',
-                           'Mean Experience Time', 'Mean Learn Time', 'Mean Episode Time', 'Reward'], filename)
+                           'K', 'Gamma', 'Epsilon', 'Max Episode Length', 'Trace Length', 'Mean See Time',
+                           'Mean Act Time', 'Mean Experience Time', 'Mean Learn Time', 'Mean Episode Time', 'Reward'],
+                          filename)
 
-# Initialize progress variable TODO: combine with performance
+# Initialize progress variable
 progress = Progress(0, epoch, "Epoch", True)
 
 # Main method
 if __name__ == "__main__":
-    # Initialize environment
+    # Initialize
     state = env.reset()
     run_through = 0
     num_states = 0
@@ -212,7 +213,7 @@ if __name__ == "__main__":
 
             # Experience
             experience = {"state": scene, "action": action, "reward": reward, "value": None, "expected": expected,
-                          "duplicate": duplicate, "time_accessed": None, "terminal": done}
+                          "duplicate": duplicate, "terminal": done, "time_accessed": None, "time": None}
 
             # Observe the experience such that traces and short term memory are updated
             agent.experience(experience)
@@ -261,7 +262,7 @@ if __name__ == "__main__":
                 # Re-initialize progress
                 progress = Progress(0, epoch, "Epoch", True)
 
-            # Reset environment
+            # Reset
             state = env.reset()
             t = 0
             rewards = 0

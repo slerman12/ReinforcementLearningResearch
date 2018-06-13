@@ -134,3 +134,67 @@ class Agent:
 
         # Measure time
         self.timer = time.time() - start_time
+
+
+class MFEC(Agent):
+    def act(self, scene):
+        # Start timing
+        start_time = time.time()
+
+        # Number of actions
+        num_actions = self.actions.size
+
+        # Initialize expected values
+        expected_per_action = np.zeros(num_actions)
+
+        # Initialize duplicate (negative means no duplicate) and respective action
+        duplicate = np.full(num_actions, -1)
+
+        # Get expected value for each action
+        for action in self.actions:
+            # Initialize expected value at 0
+            expected = 0
+
+            # Number of similar memories
+            num_similar_memories = min(self.long_term_memory[action].length, self.k)
+
+            # If there are memories to draw from
+            if num_similar_memories > 0:
+                # Similar memories
+                distances, indices = self.long_term_memory[action].retrieve(scene, self.k)
+
+                # For each similar memory
+                for i in range(num_similar_memories):
+                    # Distance
+                    distance = distances[i]
+
+                    # Note if duplicate and if so use its value
+                    if distance == 0:
+                        # Note duplicate and action
+                        duplicate[action] = indices[i]
+
+                        # Use this value
+                        expected = self.long_term_memory[action].memories["value"][indices[i]]
+                        break
+
+                    # Add to running sum of values
+                    expected += self.long_term_memory[action].memories["value"][indices[i]]
+
+                # Finish computing expected value
+                if duplicate[action] < 0:
+                    expected /= num_similar_memories
+
+            # Record expected value for this action
+            expected_per_action[action] = expected
+
+        # Decide whether to explore according to epsilon probability
+        explore = np.random.choice(np.arange(2), p=[1 - self.epsilon, self.epsilon])
+
+        # Choose best action or explore
+        action = expected_per_action.argmax() if not explore else np.random.choice(np.arange(self.actions.size))
+
+        # Measure time
+        self.timer = time.time() - start_time
+
+        # Return the chosen action, the expected return value, and whether or not this experience happened before
+        return self.actions[action], expected_per_action[action], duplicate[action]

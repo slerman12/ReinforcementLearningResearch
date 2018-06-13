@@ -140,6 +140,9 @@ class Memories:
         self.num_duplicates = 0
 
     def store(self, memory, check_duplicate=False):
+        # Set time of memory to current time
+        memory["time"] = self.time
+
         # Set time accessed to current time
         self.set_time_accessed(memory)
 
@@ -171,7 +174,7 @@ class Memories:
                     self.memories[attribute][duplicate_index] = memory[attribute]
 
             # Set time accessed
-            self.set_time_accessed(self.memories, duplicate_index)
+            self.set_time_accessed(self.memories, duplicate_index, True)
 
     def retrieve(self, experience, k):
         # Retrieve k most similar memories #
@@ -204,7 +207,7 @@ class Memories:
             # self.tree.fit(self.memories[:self.length, :-num_attributes],
             #               self.memories[:self.length, self.attributes["value"]])
 
-    def set_time_accessed(self, memory, index=None):
+    def set_time_accessed(self, memory, index=None, increment_time=False):
         # Set time of access
         if index is None:
             memory["time_accessed"] = self.time
@@ -212,7 +215,8 @@ class Memories:
             memory["time_accessed"][int(index)] = self.time
 
         # Increment time
-        self.time += 0.1
+        if increment_time:
+            self.time += 0.1
 
     def get_memory_by_index(self, index):
         # Initialize memory
