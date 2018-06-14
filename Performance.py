@@ -9,37 +9,56 @@ class Performance:
     metrics = {}
     filename = None
 
-    def __init__(self, metric_names, filename):
+    def __init__(self, metric_names, filename, epoch):
         # Initialize variables
         self.metric_names = metric_names
         self.filename = filename
-        self.reset()
+        self.epoch = epoch
 
-        # Create file
-        pd.DataFrame(data=self.metrics).to_csv('Data/{}.csv'.format(filename), index=False, columns=metric_names)
-
-    def reset(self):
         # Empty metrics variable
         for name in self.metric_names:
             self.metrics[name] = []
+
+        # Initialize progress variable
+        self.progress = Progress(0, epoch, "Epoch", True)
+
+        # Create file
+        pd.DataFrame(data=self.metrics).to_csv('Data/{}.csv'.format(filename), index=False, columns=metric_names)
 
     def measure_performance(self, performance):
         # Add metrics
         for key in performance:
             self.metrics[key].append(performance[key])
 
-    def output_performance(self, aggregation=mean):
-        # Print metrics
-        for key in self.metrics:
-            print("* {}: {}".format(key, aggregation(self.metrics[key])))
-        print("")
+        # Update progress
+        self.progress.update_progress()
 
-        # Output metrics to file
-        with open('Data/{}.csv'.format(self.filename), 'a') as data_file:
-            pd.DataFrame(data=self.metrics).to_csv(data_file, index=False, header=False, columns=self.metric_names)
+    def output_performance(self, description, run_through, aggregation=mean):
+        # End epoch
+        if not run_through % self.epoch:
+            # Output performance
+            print(description)
+            print("Epoch: {}".format(run_through / self.epoch))
 
-        # Reset metrics
-        self.reset()
+            # Print metrics
+            for key in self.metrics:
+                print("* {}: {}".format(key, aggregation(self.metrics[key])))
+            print("")
+
+            # Output metrics to file
+            with open('Data/{}.csv'.format(self.filename), 'a') as data_file:
+                pd.DataFrame(data=self.metrics).to_csv(data_file, index=False, header=False, columns=self.metric_names)
+
+            # Reset metrics
+            self.reset()
+
+    def reset(self):
+        # Empty metrics variable
+        for name in self.metric_names:
+            self.metrics[name] = []
+
+        # Re-initialize progress
+        self.progress.reset()
 
 
 # Display progress in console
@@ -68,3 +87,9 @@ class Progress:
             sys.stdout.flush()
         if (self.progress_complete == self.progress_total) and self.show:
             print("")
+
+    def reset(self):
+        self.progress_complete = 0.00
+        if self.show:
+            sys.stdout.write("\rProgress: {:.2%} [{}]".format(0, self.name))
+            sys.stdout.flush()

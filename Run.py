@@ -1,8 +1,8 @@
 from __future__ import division
-from Performance import Performance, Progress
-from Vision import Vision, RandomProjection
-from Memories import Memories, Traces
-from Agent import Agent, MFEC
+import Performance
+import Vision
+import Memories
+import Agent
 import numpy as np
 import gym
 import time
@@ -126,43 +126,39 @@ vision = None
 # state_space = 64
 
 # Attributes
-attributes = dict(state=state_space, action=1, reward=1, value=1, expected=1, duplicate=1, terminal=1, time_accessed=1,
-                  time=1)
+attributes = dict(state=state_space, action=1, reward=1, value=1, expected=1, duplicate=1, terminal=1, time_accessed=1)
 
 # Memories
-long_term_memory = [Memories(capacity=400000, attributes=attributes) for _ in action_space]
-short_term_memory = [Memories(capacity=max_episode_length, attributes=attributes) for _ in action_space]
+long_term_memory = [Memories.Memories(capacity=400000, attributes=attributes) for _ in action_space]
+short_term_memory = [Memories.Memories(capacity=max_episode_length, attributes=attributes) for _ in action_space]
 
 # Reward traces
-traces = Traces(capacity=trace_length, attributes=attributes, memories=short_term_memory, gamma=0.999)
+traces = Memories.Traces(capacity=trace_length, attributes=attributes, memories=short_term_memory, gamma=0.999)
 
-# Agent TODO: add Memory Agent (policy-based memory rather than value) using overridden act method
-agent = Agent(vision=vision, long_term_memory=long_term_memory, short_term_memory=short_term_memory, traces=traces,
-              attributes=attributes, actions=action_space, epsilon=1, k=50)
+# Agent TODO: add Memory Agent (policy-based memory rather than value), prioritized experience, & value updates
+agent = Agent.Agent(vision=vision, long_term_memory=long_term_memory, short_term_memory=short_term_memory,
+                    traces=traces, attributes=attributes, actions=action_space, epsilon=1, k=50)
 
 # File name
 filename_prefix = "Segmentation"
 filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                   datetime.datetime.now().strftime('%H_%M'))
 
-# Initialize metrics for measuring performance
-performance = Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size', 'Number of Duplicates',
-                           'K', 'Gamma', 'Epsilon', 'Max Episode Length', 'Trace Length', 'Mean See Time',
-                           'Mean Act Time', 'Mean Experience Time', 'Mean Learn Time', 'Mean Episode Time', 'Reward'],
-                          filename)
-
-# Initialize progress variable
-progress = Progress(0, epoch, "Epoch", True)
+# Initialize metrics for measuring performance TODO: Add model saving
+performance = Performance.Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size',
+                                       'Number of Duplicates', 'K', 'Gamma', 'Epsilon', 'Max Episode Length',
+                                       'Trace Length', 'Mean See Time', 'Mean Act Time', 'Mean Experience Time',
+                                       'Mean Learn Time', 'Mean Episode Time', 'Reward'], filename, epoch)
 
 # Main method
 if __name__ == "__main__":
-    # Initialize
+    # Initialize environment and measurement variables
     state = env.reset()
-    run_through = 0
-    num_states = 0
-    t = 0
     done = False
-    rewards = 0
+    run_through = 0
+    total_steps = 0
+    run_through_step = 0
+    run_through_reward = 0
     see_times = []
     act_times = []
     experience_times = []
@@ -176,8 +172,8 @@ if __name__ == "__main__":
         # For every time step in episode
         for _ in range(max_episode_length):
             # Increment step
-            num_states += 1
-            t += 1
+            total_steps += 1
+            run_through_step += 1
 
             # Display environment
             # if run_through > 5:
@@ -195,6 +191,7 @@ if __name__ == "__main__":
 
             # Set likelihood of picking a random action
             agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
+            # agent.epsilon = max(1 / (episode + 1), 0.001)
 
             # Get action
             action, expected, duplicate = agent.act(scene=scene)
@@ -206,10 +203,10 @@ if __name__ == "__main__":
             state, reward, done, _ = env.step(action)
 
             # Episode done at terminal state or at max run-through length
-            done = done or t > max_run_through_length
+            done = done or run_through_step > max_run_through_length
 
             # Measure performance
-            rewards += reward
+            run_through_reward += reward
 
             # Experience
             experience = {"state": scene, "action": action, "reward": reward, "value": None, "expected": expected,
@@ -238,34 +235,24 @@ if __name__ == "__main__":
             # Increment run-through
             run_through += 1
 
-            # Update progress
-            progress.update_progress()
-
             # Measure performance
-            metrics = {'Run-Through': run_through, 'Episode': episode + 1, 'State': num_states, 'Number of Steps': t,
+            metrics = {'Run-Through': run_through, 'Episode': episode + 1, 'State': total_steps, 'Number of Steps': run_through_step,
                        'Memory Size': sum([long_term_memory[a].length for a in action_space]),
                        'Number of Duplicates': sum([long_term_memory[a].num_duplicates for a in action_space]),
                        "K": agent.k, "Gamma": traces.gamma, "Epsilon": round(agent.epsilon, 3),
                        'Max Episode Length': max_episode_length, 'Trace Length': trace_length,
                        'Mean See Time': np.mean(see_times), 'Mean Act Time': np.mean(act_times),
                        'Mean Experience Time': np.mean(experience_times), 'Mean Learn Time': np.mean(learn_times),
-                       'Mean Episode Time': np.mean(episode_times), 'Reward': rewards}
+                       'Mean Episode Time': np.mean(episode_times), 'Reward': run_through_reward}
             performance.measure_performance(metrics)
 
-            # End epoch
-            if not run_through % epoch:
-                # Output performance TODO: save models
-                print(env_name)
-                print("Epoch: {}".format(run_through / epoch))
-                performance.output_performance()
+            # Output performance per epoch
+            performance.output_performance(env_name, run_through)
 
-                # Re-initialize progress
-                progress = Progress(0, epoch, "Epoch", True)
-
-            # Reset
+            # Reset environment and measurement variables
             state = env.reset()
-            t = 0
-            rewards = 0
+            run_through_step = 0
+            run_through_reward = 0
             see_times = []
             act_times = []
             experience_times = []

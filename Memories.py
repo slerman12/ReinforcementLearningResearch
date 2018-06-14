@@ -133,19 +133,10 @@ class Memories:
         # Consolidated memories
         self.tree = None
 
-        # Internal perception of time
-        self.time = 0
-
         # Number of duplicates
         self.num_duplicates = 0
 
     def store(self, memory, check_duplicate=False):
-        # Set time of memory to current time
-        memory["time"] = self.time
-
-        # Set time accessed to current time
-        self.set_time_accessed(memory)
-
         # Duplicate index (positive if exists)
         duplicate_index = int(memory["duplicate"]) if check_duplicate else -1
 
@@ -173,17 +164,10 @@ class Memories:
                 for attribute, dimensionality in self.attributes.items():
                     self.memories[attribute][duplicate_index] = memory[attribute]
 
-            # Set time accessed
-            self.set_time_accessed(self.memories, duplicate_index, True)
-
     def retrieve(self, experience, k):
         # Retrieve k most similar memories #
         dist, ind = self.tree.query([experience], k=min(k, self.length))
         # ind, dist = self.tree.nn_index(experience.reshape(1, experience.shape[0]), min(k, self.length))
-
-        # Update access times
-        for i in ind[0]:
-            self.set_time_accessed(self.memories, i)
 
         # Return memories
         return dist[0], ind[0]
@@ -199,24 +183,13 @@ class Memories:
             short_term_memories.reset()
 
             # Build tree of long term memories
-            # self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
             self.tree = KDTree(self.memories["state"][:self.length], leaf_size=400)
+            # self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
             # self.tree = FLANN()
             # self.tree.build_index(self.memories[:self.length, :-num_attributes])
             # self.tree = KNeighborsRegressor(n_neighbors=min(50, self.length))
             # self.tree.fit(self.memories[:self.length, :-num_attributes],
             #               self.memories[:self.length, self.attributes["value"]])
-
-    def set_time_accessed(self, memory, index=None, increment_time=False):
-        # Set time of access
-        if index is None:
-            memory["time_accessed"] = self.time
-        else:
-            memory["time_accessed"][int(index)] = self.time
-
-        # Increment time
-        if increment_time:
-            self.time += 0.1
 
     def get_memory_by_index(self, index):
         # Initialize memory
