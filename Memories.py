@@ -137,32 +137,19 @@ class Memories:
         self.num_duplicates = 0
 
     def store(self, memory, check_duplicate=False):
-        # Duplicate index (positive if exists)
-        duplicate_index = int(memory["duplicate"]) if check_duplicate else -1
+        # If memory capacity has not been reached
+        if self.length < self.capacity:
+            # Add memory
+            for attribute, dimensionality in self.attributes.items():
+                self.memories[attribute][self.length] = memory[attribute]
 
-        # If not a duplicate
-        if duplicate_index < 0:
-            # If memory capacity has not been reached
-            if self.length < self.capacity:
-                # Add memory
-                for attribute, dimensionality in self.attributes.items():
-                    self.memories[attribute][self.length] = memory[attribute]
-
-                # Update length
-                self.length += 1
-            else:
-                # Replace least recently accessed memory with new memory
-                least_recently_accessed = np.argmin(self.memories["time_accessed"][:self.length])
-                for attribute, dimensionality in self.attributes.items():
-                    self.memories[attribute][least_recently_accessed] = memory[attribute]
+            # Update length
+            self.length += 1
         else:
-            # Increment duplicates counter
-            self.num_duplicates += 1
-
-            # Reconcile duplicate by using one with max value
-            if self.memories["value"][duplicate_index] < memory["value"]:
-                for attribute, dimensionality in self.attributes.items():
-                    self.memories[attribute][duplicate_index] = memory[attribute]
+            # Replace least recently accessed memory with new memory
+            least_recently_accessed = np.argmin(self.memories["time_accessed"][:self.length])
+            for attribute, dimensionality in self.attributes.items():
+                self.memories[attribute][least_recently_accessed] = memory[attribute]
 
     def retrieve(self, experience, k):
         # Retrieve k most similar memories #
@@ -201,7 +188,7 @@ class Memories:
 
         # Return memory
         return memory
-        
+
     def reset(self):
         # Reset internal states
         self.tree = None
@@ -211,3 +198,33 @@ class Memories:
                 self.memories[attribute] = np.zeros((self.capacity, dimensionality))
             else:
                 self.memories[attribute] = np.zeros(self.capacity)
+
+
+class MFEC(Memories):
+    def store(self, memory, check_duplicate=False):
+        # Duplicate index (positive if exists)
+        duplicate_index = int(memory["duplicate"]) if check_duplicate else -1
+
+        # If not a duplicate
+        if duplicate_index < 0:
+            # If memory capacity has not been reached
+            if self.length < self.capacity:
+                # Add memory
+                for attribute, dimensionality in self.attributes.items():
+                    self.memories[attribute][self.length] = memory[attribute]
+
+                # Update length
+                self.length += 1
+            else:
+                # Replace least recently accessed memory with new memory
+                least_recently_accessed = np.argmin(self.memories["time_accessed"][:self.length])
+                for attribute, dimensionality in self.attributes.items():
+                    self.memories[attribute][least_recently_accessed] = memory[attribute]
+        else:
+            # Increment duplicates counter
+            self.num_duplicates += 1
+
+            # Reconcile duplicate by using one with max value
+            if self.memories["value"][duplicate_index] < memory["value"]:
+                for attribute, dimensionality in self.attributes.items():
+                    self.memories[attribute][duplicate_index] = memory[attribute]

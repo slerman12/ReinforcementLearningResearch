@@ -1,10 +1,12 @@
 from __future__ import division
 import time
 import numpy as np
+import tensorflow as tf
 
 
 class Agent:
-    def __init__(self, vision, long_term_memory, short_term_memory, traces, attributes, actions, epsilon, k):
+    def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
+                 actions=None, epsilon=None, k=None):
         # For measuring performance
         self.timer = 0
 
@@ -28,6 +30,17 @@ class Agent:
         self.actions = actions
         self.epsilon = epsilon
         self.k = k
+
+        # Learning
+        self.brain = self.session = self.loss = self.train = self.accuracy = None
+
+    def start_brain(self):
+        # Default brain
+        if self.vision is not None:
+            self.brain = self.vision.brain
+
+    def stop_brain(self):
+        tf.Session.close(self.session)
 
     def see(self, state):
         # Start timing
@@ -95,7 +108,7 @@ class Agent:
                 if duplicate[action] < 0:
                     # expected /= num_similar_memories
                     expected /= weights
-                # expected = self.long_term_memory[action].tree.predict([scene])[0]
+                    # expected = self.long_term_memory[action].tree.predict([scene])[0]
 
             # Record expected value for this action
             expected_per_action[action] = expected
@@ -122,7 +135,7 @@ class Agent:
 
         # Update visual model
         if self.vision is not None:
-            self.vision.learn(experience)
+            self.vision.experience(experience)
 
         # Add trace
         self.traces.add(experience)
@@ -133,16 +146,30 @@ class Agent:
         # Measure time
         self.timer = time.time() - start_time
 
-    def learn(self):
+    def learn(self, inputs=None):
         # Start timing
         start_time = time.time()
 
+        # Default variables
+        if inputs is None:
+            inputs = {}
+        loss = None
+
         # Consolidate memories
-        for action in self.actions:
-            self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
+        if self.long_term_memory is not None:
+            for action in self.actions:
+                self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
+
+        # Train brain
+        if self.train is not None:
+            _, loss = self.session.run([self.train, self.loss],
+                                       feed_dict={self.brain.placeholders[key]: inputs[key] for key in inputs.keys()})
 
         # Measure time
         self.timer = time.time() - start_time
+
+        # Return loss
+        return loss
 
     def move_time_forward(self):
         # Size of discrete time unit
@@ -289,3 +316,29 @@ class NEC(Agent):
 
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
+
+
+class LSTMClassifier(Agent):
+    def start_brain(self):
+        self.brain = self.vision.brain
+
+        # Loss function
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+            logits=self.brain.brain, labels=self.brain.placeholders["desired_outputs"]))
+
+        # Training
+        self.train = tf.train.GradientDescentOptimizer(learning_rate=self.brain.params["learning_rate"]) \
+            .minimize(self.loss)
+
+        # Test accuracy
+        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
+            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
+
+        # For initializing variables
+        initialize_variables = tf.global_variables_initializer()
+
+        # Start session
+        self.session = tf.Session()
+
+        # Initialize variables
+        self.session.run(initialize_variables)

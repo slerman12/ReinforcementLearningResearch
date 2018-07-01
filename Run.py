@@ -129,8 +129,8 @@ vision = None
 attributes = dict(state=state_space, action=1, reward=1, value=1, expected=1, duplicate=1, terminal=1, time_accessed=1)
 
 # Memories
-long_term_memory = [Memories.Memories(capacity=400000, attributes=attributes) for _ in action_space]
-short_term_memory = [Memories.Memories(capacity=max_episode_length, attributes=attributes) for _ in action_space]
+long_term_memory = [Memories.MFEC(capacity=400000, attributes=attributes) for _ in action_space]
+short_term_memory = [Memories.MFEC(capacity=max_episode_length, attributes=attributes) for _ in action_space]
 
 # Reward traces
 traces = Memories.Traces(capacity=trace_length, attributes=attributes, memories=short_term_memory, gamma=0.999)
@@ -148,7 +148,7 @@ filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.t
 performance = Performance.Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size',
                                        'Number of Duplicates', 'K', 'Gamma', 'Epsilon', 'Max Episode Length',
                                        'Trace Length', 'Mean See Time', 'Mean Act Time', 'Mean Experience Time',
-                                       'Mean Learn Time', 'Mean Episode Time', 'Reward'], filename, epoch)
+                                       'Mean Learn Time', 'Mean Episode Time', 'Reward'], epoch, filename)
 
 # Main method
 if __name__ == "__main__":
@@ -247,7 +247,7 @@ if __name__ == "__main__":
             performance.measure_performance(metrics)
 
             # Output performance per epoch
-            performance.output_performance(env_name, run_through)
+            performance.output_performance(run_through, env_name)
 
             # Reset environment and measurement variables
             state = env.reset()

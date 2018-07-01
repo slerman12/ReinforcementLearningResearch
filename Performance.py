@@ -9,7 +9,7 @@ class Performance:
     metrics = {}
     filename = None
 
-    def __init__(self, metric_names, filename, epoch):
+    def __init__(self, metric_names, epoch, filename=None):
         # Initialize variables
         self.metric_names = metric_names
         self.filename = filename
@@ -23,7 +23,7 @@ class Performance:
         self.progress = Progress(0, epoch, "Epoch", True)
 
         # Create file
-        pd.DataFrame(data=self.metrics).to_csv('Data/{}.csv'.format(filename), index=False, columns=metric_names)
+        pd.DataFrame(data=self.metrics).to_csv('Results/{}.csv'.format(filename), index=False, columns=metric_names)
 
     def measure_performance(self, performance):
         # Add metrics
@@ -33,7 +33,7 @@ class Performance:
         # Update progress
         self.progress.update_progress()
 
-    def output_performance(self, description, run_through, aggregation=mean):
+    def output_performance(self, run_through, description="Performance", aggregation=mean):
         # End epoch
         if not run_through % self.epoch:
             # Output performance
@@ -46,8 +46,10 @@ class Performance:
             print("")
 
             # Output metrics to file
-            with open('Data/{}.csv'.format(self.filename), 'a') as data_file:
-                pd.DataFrame(data=self.metrics).to_csv(data_file, index=False, header=False, columns=self.metric_names)
+            if self.filename is not None:
+                with open('Results/{}.csv'.format(self.filename), 'a') as data_file:
+                    pd.DataFrame(data=self.metrics).to_csv(data_file, index=False, header=False,
+                                                           columns=self.metric_names)
 
             # Reset metrics
             self.reset()

@@ -6,9 +6,62 @@ from skimage.segmentation import felzenszwalb, mark_boundaries
 from sklearn import random_projection
 from sklearn.neighbors.kd_tree import KDTree
 import matplotlib.pyplot as plt
+import tensorflow as tf
 
 
 class Vision:
+    def __init__(self, size=None, greyscale=False, crop=None, params=None, brain=None):
+        # State
+        self.state = None
+
+        # Pre-processing
+        self.size = size
+        self.greyscale = greyscale
+        self.crop = crop
+
+        # Parameters
+        self.params = {} if params is None else params
+
+        # Architecture ("brain module")
+        self.brain = brain
+
+        # Learning
+        self.session = self.loss = self.train = self.accuracy = None
+
+    def start_brain(self):
+        pass
+
+    def see(self, state):
+        # Set state
+        self.state = state
+
+        # Greyscale
+        if self.greyscale:
+            self.state = np.dot(self.state[..., :3], [0.299, 0.587, 0.114])
+
+        # Crop image
+        if self.crop is not None:
+            height = self.state.shape[0]
+            width = self.state.shape[1]
+            self.state = self.state[self.crop[0]:(height - self.crop[1]), self.crop[3]:(width - self.crop[2])]
+
+        # Image resize
+        if self.size is not None:
+            self.state = cv2.resize(self.state, dsize=self.size)
+
+        # Return meaningful representation
+        return self.brain.run(state)
+
+    def experience(self, experience):
+        pass
+
+    def learn(self, session, inputs):
+        # Train brain
+        if self.train is not None:
+            session.run(self.train, feed_dict={self.brain.placeholders[key]: inputs[key] for key in inputs.keys()})
+
+
+class Segmentation:
     def __init__(self, object_capacity, size=None, greyscale=False, crop=None, params=None, trajectory=True):
         # State
         self.state = None
@@ -54,7 +107,7 @@ class Vision:
         if self.greyscale:
             self.state = np.dot(self.state[..., :3], [0.299, 0.587, 0.114])
 
-        # Crop top of image
+        # Crop image
         if self.crop is not None:
             height = self.state.shape[0]
             width = self.state.shape[1]
@@ -106,7 +159,7 @@ class Vision:
         # Return flattened scene
         return self.scene.flatten()
 
-    def learn(self, experience):
+    def learn(self):
         pass
 
     def compute_trajectories(self):
