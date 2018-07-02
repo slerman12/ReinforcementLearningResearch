@@ -50,15 +50,15 @@ class Vision:
             self.state = cv2.resize(self.state, dsize=self.size)
 
         # Return meaningful representation
-        return self.brain.run(state)
+        return self.brain.run(inputs={"inputs": state})
 
     def experience(self, experience):
         pass
 
-    def learn(self, session, inputs):
+    def learn(self, inputs):
         # Train brain
         if self.train is not None:
-            session.run(self.train, feed_dict={self.brain.placeholders[key]: inputs[key] for key in inputs.keys()})
+            self.brain.run(inputs, self.train)
 
 
 class Segmentation:

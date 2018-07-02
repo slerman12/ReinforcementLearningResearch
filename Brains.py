@@ -8,8 +8,14 @@ class Brains:
         # Initialize brain 
         self.brain = None
 
-        # Initialize graph components
+        # Initialize session
+        self.session = None
+
+        # Initialize graph inputs
         self.placeholders = None
+
+        # Initialize graph components
+        self.components = None
 
         # Set parameters
         self.params = params
@@ -17,9 +23,14 @@ class Brains:
         # Build the brain
         self.build()
 
-    def run(self, session, inputs):
+    def run(self, inputs=None, component=None):
+        # Default no inputs
+        if inputs is None:
+            inputs = {}
+
         # Run inputs through brain
-        return session.run(self.brain, feed_dict={"inputs": inputs})
+        return self.session.run(self.brain if component is None else component,
+                                feed_dict={self.placeholders[key]: inputs[key] for key in inputs.keys()})
 
     def build(self):
         pass
@@ -53,4 +64,7 @@ class LSTM(Brains):
         logits = tf.matmul(outputs[-1], weights['out']) + biases['out']
 
         # Activation
-        self.brain = {"output": tf.nn.softmax(logits), "logits": logits}
+        self.components = {"output": tf.nn.softmax(logits), "logits": logits}
+
+        # Brain
+        self.brain = self.components["output"]

@@ -49,8 +49,7 @@ if __name__ == "__main__":
     test_label = mnist.test.labels[:128]
 
     # Print testing accuracy
-    print("Testing Accuracy:",
-          agent.session.run(agent.accuracy, feed_dict={"inputs": test_data, "desired_outputs": test_label}))
+    print("Testing Accuracy:", agent.brain.run({"inputs": test_data, "desired_outputs": test_label}, agent.accuracy))
 
     # Stop agent
     agent.stop_brain()

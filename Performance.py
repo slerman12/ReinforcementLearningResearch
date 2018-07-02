@@ -63,16 +63,16 @@ class Performance:
                                                            columns=self.metric_names)
 
             # Reset metrics
-            self.reset()
+            self.reset(print_output)
 
-    def reset(self):
+    def reset(self, print_output):
         # Empty metrics variable
         for name in self.metric_names:
             self.metrics[name] = []
 
         # Re-initialize progress
         if self.progress is None:
-            self.progress = Progress(0, self.epoch - 1, "Epoch", True)
+            self.progress = Progress(0, self.epoch - 1, "Epoch", print_output)
         else:
             self.progress.progress_total = self.epoch
             self.progress.reset()

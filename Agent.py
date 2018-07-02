@@ -162,8 +162,7 @@ class Agent:
 
         # Train brain
         if self.train is not None:
-            _, loss = self.session.run([self.train, self.loss],
-                                       feed_dict={self.brain.placeholders[key]: inputs[key] for key in inputs.keys()})
+            _, loss = self.brain.run(inputs, [self.train, self.loss])
 
         # Measure time
         self.timer = time.time() - start_time
@@ -245,6 +244,18 @@ class MFEC(Agent):
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
 
+    def learn(self, inputs=None):
+        # Start timing
+        start_time = time.time()
+
+        # Consolidate memories
+        if self.long_term_memory is not None:
+            for action in self.actions:
+                self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
+
+        # Measure time
+        self.timer = time.time() - start_time
+
 
 class NEC(Agent):
     def act(self, scene):
@@ -317,6 +328,30 @@ class NEC(Agent):
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
 
+    def learn(self, inputs=None):
+        # Start timing
+        start_time = time.time()
+
+        # Default variables
+        if inputs is None:
+            inputs = {}
+        loss = None
+
+        # Consolidate memories
+        if self.long_term_memory is not None:
+            for action in self.actions:
+                self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
+
+        # Train brain
+        if self.train is not None:
+            _, loss = self.brain.run(inputs, [self.train, self.loss])
+
+        # Measure time
+        self.timer = time.time() - start_time
+
+        # Return loss
+        return loss
+
 
 class LSTMClassifier(Agent):
     def start_brain(self):
@@ -325,15 +360,15 @@ class LSTMClassifier(Agent):
 
         # Loss function
         self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-            logits=self.brain.brain["logits"], labels=self.brain.placeholders["desired_outputs"]))
+            logits=self.brain.components["logits"], labels=self.brain.placeholders["desired_outputs"]))
 
         # Training
         self.train = tf.train.GradientDescentOptimizer(learning_rate=self.brain.params["learning_rate"]) \
             .minimize(self.loss)
 
         # Test accuracy
-        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(
-            self.brain.brain["output"], 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
+        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
+            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
 
         # For initializing variables
         initialize_variables = tf.global_variables_initializer()
@@ -343,3 +378,6 @@ class LSTMClassifier(Agent):
 
         # Initialize variables
         self.session.run(initialize_variables)
+
+        # Assign session to brain
+        self.brain.session = self.session
