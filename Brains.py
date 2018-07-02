@@ -11,7 +11,7 @@ class Brains:
         # Initialize session
         self.session = None
 
-        # Initialize graph inputs
+        # Initialize graph placeholders
         self.placeholders = None
 
         # Initialize graph components
@@ -23,14 +23,14 @@ class Brains:
         # Build the brain
         self.build()
 
-    def run(self, inputs=None, component=None):
+    def run(self, placeholders=None, component=None):
         # Default no inputs
-        if inputs is None:
-            inputs = {}
+        if placeholders is None:
+            placeholders = {}
 
         # Run inputs through brain
         return self.session.run(self.brain if component is None else component,
-                                feed_dict={self.placeholders[key]: inputs[key] for key in inputs.keys()})
+                                feed_dict={self.placeholders[key]: placeholders[key] for key in placeholders.keys()})
 
     def build(self):
         pass

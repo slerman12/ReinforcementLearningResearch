@@ -5,7 +5,6 @@ import Agent
 import Brains
 from tensorflow.examples.tutorials.mnist import input_data
 
-
 # MNIST data
 mnist = input_data.read_data_sets("Data", one_hot=True)
 
@@ -29,14 +28,14 @@ if __name__ == "__main__":
     # Training iterations
     for episode in range(1, 10000 + 1):
         # Batch data
-        batch_x, batch_y = mnist.train.next_batch(brain_parameters["batch_size"])
+        batch_inputs, batch_desired_outputs = mnist.train.next_batch(brain_parameters["batch_size"])
 
-        # Reshape data to get 28 seq of 28 elements
-        batch_x = batch_x.reshape((brain_parameters["batch_size"], brain_parameters["timesteps"],
-                                   brain_parameters["num_input"]))
+        # Reshape image to 28 x 28
+        batch_inputs = batch_inputs.reshape((brain_parameters["batch_size"], brain_parameters["timesteps"],
+                                             brain_parameters["num_input"]))
 
         # Train
-        loss = agent.learn({"inputs": batch_x, "desired_outputs": batch_y})
+        loss = agent.learn({"inputs": batch_inputs, "desired_outputs": batch_desired_outputs})
 
         # Measure performance
         performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Loss": loss})
@@ -49,7 +48,7 @@ if __name__ == "__main__":
     test_label = mnist.test.labels[:128]
 
     # Print testing accuracy
-    print("\nTesting Accuracy:", agent.brain.run({"inputs": test_data, "desired_outputs": test_label}, agent.accuracy))
+    print("Testing Accuracy:", agent.brain.run({"inputs": test_data, "desired_outputs": test_label}, agent.accuracy))
 
     # Stop agent
     agent.stop_brain()

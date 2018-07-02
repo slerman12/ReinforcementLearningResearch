@@ -146,13 +146,13 @@ class Agent:
         # Measure time
         self.timer = time.time() - start_time
 
-    def learn(self, inputs=None):
+    def learn(self, placeholders=None):
         # Start timing
         start_time = time.time()
 
         # Default variables
-        if inputs is None:
-            inputs = {}
+        if placeholders is None:
+            placeholders = {}
         loss = None
 
         # Consolidate memories
@@ -162,7 +162,7 @@ class Agent:
 
         # Train brain
         if self.train is not None:
-            _, loss = self.brain.run(inputs, [self.train, self.loss])
+            _, loss = self.brain.run(placeholders, [self.train, self.loss])
 
         # Measure time
         self.timer = time.time() - start_time
@@ -244,7 +244,7 @@ class MFEC(Agent):
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
 
-    def learn(self, inputs=None):
+    def learn(self, placeholders=None):
         # Start timing
         start_time = time.time()
 
@@ -328,13 +328,13 @@ class NEC(Agent):
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
 
-    def learn(self, inputs=None):
+    def learn(self, placeholders=None):
         # Start timing
         start_time = time.time()
 
         # Default variables
-        if inputs is None:
-            inputs = {}
+        if placeholders is None:
+            placeholders = {}
         loss = None
 
         # Consolidate memories
@@ -344,7 +344,7 @@ class NEC(Agent):
 
         # Train brain
         if self.train is not None:
-            _, loss = self.brain.run(inputs, [self.train, self.loss])
+            _, loss = self.brain.run(placeholders, [self.train, self.loss])
 
         # Measure time
         self.timer = time.time() - start_time
