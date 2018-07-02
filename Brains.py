@@ -1,10 +1,9 @@
 import tensorflow as tf
 from tensorflow.contrib import rnn
-from tensorflow.examples.tutorials.mnist import input_data
 
 
 class Brains:
-    def __init__(self, params):
+    def __init__(self, parameters):
         # Initialize brain 
         self.brain = None
 
@@ -18,7 +17,7 @@ class Brains:
         self.components = None
 
         # Set parameters
-        self.params = params
+        self.parameters = parameters
 
         # Build the brain
         self.build()
@@ -39,26 +38,26 @@ class Brains:
 class LSTM(Brains):
     def build(self):
         # Graph placeholders
-        inputs = tf.placeholder("float", [None, self.params["timesteps"], self.params["num_input"]])
-        desired_outputs = tf.placeholder("float", [None, self.params["num_classes"]])
+        inputs = tf.placeholder("float", [None, self.parameters["timesteps"], self.parameters["num_input"]])
+        desired_outputs = tf.placeholder("float", [None, self.parameters["num_classes"]])
         self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs}
 
         # Model parameters
         weights = {
-            'out': tf.Variable(tf.random_normal([self.params["num_hidden"], self.params["num_classes"]]))
+            'out': tf.Variable(tf.random_normal([self.parameters["num_hidden"], self.parameters["num_classes"]]))
         }
         biases = {
-            'out': tf.Variable(tf.random_normal([self.params["num_classes"]]))
+            'out': tf.Variable(tf.random_normal([self.parameters["num_classes"]]))
         }
 
-        # Unstack to get a list of "timesteps" tensors of shape (batch_size, n_input)
-        x = tf.unstack(self.placeholders["inputs"], self.params["timesteps"], 1)
+        # Split up inputs into tensors of batch_size x num_input
+        inputs = tf.unstack(inputs, self.parameters["timesteps"], 1)
 
         # Layer of LSTM cells
-        lstm_cell = rnn.BasicLSTMCell(self.params["num_hidden"], forget_bias=1.0)
+        lstm_layer = rnn.BasicLSTMCell(self.parameters["num_hidden"], forget_bias=1.0)
 
         # Outputs and states of lstm layer
-        outputs, states = rnn.static_rnn(lstm_cell, x, dtype=tf.float32)
+        outputs, states = rnn.static_rnn(lstm_layer, inputs, dtype=tf.float32)
 
         # Logits
         logits = tf.matmul(outputs[-1], weights['out']) + biases['out']

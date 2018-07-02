@@ -18,7 +18,7 @@ class Traces:
             else:
                 self.traces[attribute] = np.zeros(capacity)
 
-        # Indices of attributes (such as reward, value, etc.)
+        # Indices of attributes (such as scene, reward, value, etc.)
         self.attributes = attributes
 
         # Max number of memories
@@ -121,7 +121,7 @@ class Memories:
             else:
                 self.memories[attribute] = np.zeros(capacity)
 
-        # Memory attributes (such as state, reward, value, etc.) and their dimensionality
+        # Memory attributes (such as scene, state, reward, value, etc.) and their dimensionality
         self.attributes = attributes
 
         # Max number of memories
@@ -157,9 +157,9 @@ class Memories:
         # Modified
         self.modified = True
 
-    def retrieve(self, experience, k):
+    def retrieve(self, scene, k):
         # Retrieve k most similar memories #
-        dist, ind = self.tree.query([experience], k=min(k, self.length))
+        dist, ind = self.tree.query([scene], k=min(k, self.length))
         # ind, dist = self.tree.nn_index(experience.reshape(1, experience.shape[0]), min(k, self.length))
 
         # Return memories
@@ -177,13 +177,13 @@ class Memories:
 
         # Consolidate memory representations
         if brain is not None:
-            self.memories["state"] = brain.run({"inputs": self.memories["raw_state"]}, brain.brain)
+            self.memories["scene"] = brain.run({"inputs": self.memories["state"]}, brain.brain)
             self.modified = True
 
         # If memories in memory and modified, consolidate tree
         if self.length > 0 and self.modified:
             # Build tree of long term memories
-            self.tree = KDTree(self.memories["state"][:self.length], leaf_size=leaf_size)
+            self.tree = KDTree(self.memories["scene"][:self.length], leaf_size=leaf_size)
             # self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
             # self.tree = FLANN()
             # self.tree.build_index(self.memories[:self.length, :-num_attributes])

@@ -126,7 +126,7 @@ vision = None
 # state_space = 64
 
 # Attributes
-attributes = dict(state=state_space, action=1, reward=1, value=1, expected=1, duplicate=1, terminal=1, time_accessed=1)
+attributes = dict(scene=state_space, action=1, reward=1, value=1, expected=1, duplicate=1, terminal=1, time_accessed=1)
 
 # Memories
 long_term_memory = [Memories.MFEC(capacity=400000, attributes=attributes) for _ in action_space]
@@ -140,7 +140,7 @@ agent = Agent.NEC(vision=vision, long_term_memory=long_term_memory, short_term_m
                   traces=traces, attributes=attributes, actions=action_space, exploration_rate=1, k=50)
 
 # File name
-filename_prefix = "Segmentation"
+filename_prefix = "Agent"
 filename = "Results/{}_{}_{}___{}.csv".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
                                               datetime.datetime.now().strftime('%H_%M'))
 
@@ -209,7 +209,7 @@ if __name__ == "__main__":
             run_through_reward += reward
 
             # Experience
-            experience = {"state": scene, "action": action, "reward": reward, "value": None, "expected": expected,
+            experience = {"scene": scene, "action": action, "reward": reward, "value": None, "expected": expected,
                           "duplicate": duplicate, "terminal": done, "time_accessed": None, "time": None}
 
             # Observe the experience such that traces and short term memory are updated

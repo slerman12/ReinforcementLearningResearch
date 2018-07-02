@@ -23,7 +23,7 @@ class Agent:
         # Traces
         self.traces = traces
 
-        # Attributes (such as state, reward, value, etc.)
+        # Attributes (such as state, scene, reward, value, etc.)
         self.attributes = attributes
 
         # Parameters
@@ -320,8 +320,7 @@ class LSTMClassifier(Agent):
             logits=self.brain.components["logits"], labels=self.brain.placeholders["desired_outputs"]))
 
         # Training
-        self.train = tf.train.GradientDescentOptimizer(learning_rate=self.brain.params["learning_rate"]) \
-            .minimize(self.loss)
+        self.train = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"]).minimize(self.loss)
 
         # Test accuracy
         self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
