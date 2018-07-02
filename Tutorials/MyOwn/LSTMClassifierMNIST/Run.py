@@ -1,17 +1,13 @@
 from __future__ import division
-
-import time
-
 import Performance
 import Vision
 import Agent
 import Brains
-import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
 
 # MNIST data
-mnist = input_data.read_data_sets("/tmp/data/", one_hot=True)
+mnist = input_data.read_data_sets("Data", one_hot=True)
 
 # Brain parameters
 brain_parameters = dict(learning_rate=0.001, batch_size=128, num_input=28, timesteps=28, num_hidden=128, num_classes=10)
@@ -23,7 +19,7 @@ vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
 agent = Agent.LSTMClassifier(vision=vision)
 
 # Initialize metrics for measuring performance
-performance = Performance.Performance(metric_names=["Loss", "Accuracy"], epoch=200)
+performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], epoch=200)
 
 # Main method
 if __name__ == "__main__":
@@ -31,7 +27,7 @@ if __name__ == "__main__":
     agent.start_brain()
 
     # Training iterations
-    for episode in range(10000):
+    for episode in range(1, 10000 + 1):
         # Batch data
         batch_x, batch_y = mnist.train.next_batch(brain_parameters["batch_size"])
 
@@ -46,7 +42,7 @@ if __name__ == "__main__":
         performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Loss": loss})
 
         # Display performance
-        performance.output_performance(episode)
+        performance.output_performance(episode, aggregation=lambda x: x[-1])
 
     # Testing data and labels
     test_data = mnist.test.images[:128].reshape((-1, brain_parameters["timesteps"], brain_parameters["num_input"]))

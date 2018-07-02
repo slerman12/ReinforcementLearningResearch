@@ -41,7 +41,7 @@ class LSTM(Brains):
         }
 
         # Unstack to get a list of "timesteps" tensors of shape (batch_size, n_input)
-        x = tf.unstack(self.inputs, self.params["timesteps"], 1)
+        x = tf.unstack(self.placeholders["inputs"], self.params["timesteps"], 1)
 
         # Layer of LSTM cells
         lstm_cell = rnn.BasicLSTMCell(self.params["num_hidden"], forget_bias=1.0)
@@ -49,5 +49,8 @@ class LSTM(Brains):
         # Outputs and states of lstm layer
         outputs, states = rnn.static_rnn(lstm_cell, x, dtype=tf.float32)
 
+        # Logits
+        logits = tf.matmul(outputs[-1], weights['out']) + biases['out']
+
         # Activation
-        self.brain = tf.nn.softmax(tf.matmul(outputs[-1], weights['out']) + biases['out'])
+        self.brain = {"output": tf.nn.softmax(logits), "logits": logits}

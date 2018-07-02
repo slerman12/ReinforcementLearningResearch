@@ -141,8 +141,8 @@ agent = Agent.Agent(vision=vision, long_term_memory=long_term_memory, short_term
 
 # File name
 filename_prefix = "Segmentation"
-filename = "{}_{}_{}___{}".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
-                                  datetime.datetime.now().strftime('%H_%M'))
+filename = "Results/{}_{}_{}___{}.csv".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
+                                              datetime.datetime.now().strftime('%H_%M'))
 
 # Initialize metrics for measuring performance TODO: Add model saving
 performance = Performance.Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size',
@@ -236,7 +236,8 @@ if __name__ == "__main__":
             run_through += 1
 
             # Measure performance
-            metrics = {'Run-Through': run_through, 'Episode': episode + 1, 'State': total_steps, 'Number of Steps': run_through_step,
+            metrics = {'Run-Through': run_through, 'Episode': episode + 1, 'State': total_steps,
+                       'Number of Steps': run_through_step,
                        'Memory Size': sum([long_term_memory[a].length for a in action_space]),
                        'Number of Duplicates': sum([long_term_memory[a].num_duplicates for a in action_space]),
                        "K": agent.k, "Gamma": traces.gamma, "Epsilon": round(agent.epsilon, 3),

@@ -163,8 +163,8 @@ class Hippocampus:
             self.memory_array[self.pointer] = memory.get_array()
             self.pointer += 1
 
-        def update(self):
+        # def update(self):
 
 
 
-    def add(self, experience):
+    # def add(self, experience):

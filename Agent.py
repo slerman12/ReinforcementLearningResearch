@@ -320,19 +320,20 @@ class NEC(Agent):
 
 class LSTMClassifier(Agent):
     def start_brain(self):
+        # Use vision
         self.brain = self.vision.brain
 
         # Loss function
         self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
-            logits=self.brain.brain, labels=self.brain.placeholders["desired_outputs"]))
+            logits=self.brain.brain["logits"], labels=self.brain.placeholders["desired_outputs"]))
 
         # Training
         self.train = tf.train.GradientDescentOptimizer(learning_rate=self.brain.params["learning_rate"]) \
             .minimize(self.loss)
 
         # Test accuracy
-        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
-            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
+        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(
+            self.brain.brain["output"], 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
 
         # For initializing variables
         initialize_variables = tf.global_variables_initializer()

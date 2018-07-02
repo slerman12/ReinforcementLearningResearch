@@ -20,10 +20,11 @@ class Performance:
             self.metrics[name] = []
 
         # Initialize progress variable
-        self.progress = Progress(0, epoch, "Epoch", True)
+        self.progress = None
 
         # Create file
-        pd.DataFrame(data=self.metrics).to_csv('Results/{}.csv'.format(filename), index=False, columns=metric_names)
+        if filename is not None:
+            pd.DataFrame(data=self.metrics).to_csv(filename, index=False, columns=metric_names)
 
     def measure_performance(self, performance):
         # Add metrics
@@ -31,23 +32,33 @@ class Performance:
             self.metrics[key].append(performance[key])
 
         # Update progress
-        self.progress.update_progress()
+        if self.progress is not None:
+            self.progress.update_progress()
 
-    def output_performance(self, run_through, description="Performance", aggregation=mean):
+    def output_performance(self, run_through, description=None, aggregation=mean, special_aggregation=None,
+                           print_output=True):
+        # Default no special aggregation
+        if special_aggregation is None:
+            special_aggregation = {}
+
         # End epoch
-        if not run_through % self.epoch:
-            # Output performance
-            print(description)
-            print("Epoch: {}".format(run_through / self.epoch))
+        if run_through % self.epoch == 0 or run_through == 1:
+            # Print performance
+            if print_output:
+                # Print description and epoch
+                if description is not None:
+                    print(description)
+                print("Epochs: {}".format(run_through // self.epoch))
 
-            # Print metrics
-            for key in self.metrics:
-                print("* {}: {}".format(key, aggregation(self.metrics[key])))
-            print("")
+                # Print metrics
+                for key in self.metrics:
+                    print("* {}: {}".format(key, aggregation(self.metrics[key]) if key not in special_aggregation.keys()
+                                            else special_aggregation[key](self.metrics[key])))
+                print("")
 
             # Output metrics to file
             if self.filename is not None:
-                with open('Results/{}.csv'.format(self.filename), 'a') as data_file:
+                with open(self.filename, 'a') as data_file:
                     pd.DataFrame(data=self.metrics).to_csv(data_file, index=False, header=False,
                                                            columns=self.metric_names)
 
@@ -60,7 +71,11 @@ class Performance:
             self.metrics[name] = []
 
         # Re-initialize progress
-        self.progress.reset()
+        if self.progress is None:
+            self.progress = Progress(0, self.epoch - 1, "Epoch", True)
+        else:
+            self.progress.progress_total = self.epoch
+            self.progress.reset()
 
 
 # Display progress in console
