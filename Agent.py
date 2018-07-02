@@ -6,7 +6,7 @@ import tensorflow as tf
 
 class Agent:
     def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
-                 actions=None, epsilon=None, k=None):
+                 actions=None, exploration_rate=None, k=None):
         # For measuring performance
         self.timer = 0
 
@@ -28,7 +28,7 @@ class Agent:
 
         # Parameters
         self.actions = actions
-        self.epsilon = epsilon
+        self.exploration_rate = exploration_rate
         self.k = k
 
         # Learning
@@ -59,27 +59,18 @@ class Agent:
         # Start timing
         start_time = time.time()
 
-        # Number of actions
-        num_actions = self.actions.size
+        # Initialize duplicate (negative means no duplicate)
+        duplicate = []
 
-        # Initialize expected values
-        expected_per_action = np.zeros(num_actions)
-
-        # Initialize duplicate (negative means no duplicate) and respective action
-        duplicate = np.full(num_actions, -1)
-
-        # Get expected value for each action
-        for action in self.actions:
-            # Initialize expected value at 0
-            expected = 0
-
+        # Memory Module
+        if self.long_term_memory is not None:
             # Number of similar memories
-            num_similar_memories = min(self.long_term_memory[action].length, self.k)
+            num_similar_memories = min(self.long_term_memory.length, self.k)
 
             # If there are memories to draw from
             if num_similar_memories > 0:
                 # Similar memories
-                distances, indices = self.long_term_memory[action].retrieve(scene, self.k)
+                distances, indices = self.long_term_memory.retrieve(scene, self.k)
 
                 # Weights
                 weights = 0
@@ -87,43 +78,25 @@ class Agent:
                 # For each similar memory
                 for i in range(num_similar_memories):
                     # Set time accessed
-                    self.long_term_memory[action].memories["time_accessed"][indices[i]] = self.perception_of_time
+                    self.long_term_memory.memories["time_accessed"][indices[i]] = self.perception_of_time
 
                     # Distance
                     distance = distances[i]
 
                     # Note if duplicate
                     if distance == 0:
-                        # Note duplicate and action
-                        duplicate[action] = indices[i]
+                        # Note duplicate
+                        duplicate.append(indices[i])
 
-                    # Weight of each memory is inverse of distance and age
+                    # Weight of each memory is inverse of distance
                     weight = 1 / (distance + 0.001)
                     weights += weight
 
-                    # Add to running sum of values
-                    expected += self.long_term_memory[action].memories["value"][indices[i]] * weight
-
-                # Finish computing expected value
-                if duplicate[action] < 0:
-                    # expected /= num_similar_memories
-                    expected /= weights
-                    # expected = self.long_term_memory[action].tree.predict([scene])[0]
-
-            # Record expected value for this action
-            expected_per_action[action] = expected
-
         # Decide whether to explore according to epsilon probability
-        explore = np.random.choice(np.arange(2), p=[1 - self.epsilon, self.epsilon])
-
-        # Choose best action or explore
-        action = expected_per_action.argmax() if not explore else np.random.choice(np.arange(self.actions.size))
+        explore = np.random.choice(np.arange(2), p=[1 - self.exploration_rate, self.exploration_rate])
 
         # Measure time
         self.timer = time.time() - start_time
-
-        # Return the chosen action, the expected return value, and whether or not this experience happened before
-        return self.actions[action], expected_per_action[action], duplicate[action]
 
     def experience(self, experience):
         # Start timing
@@ -157,8 +130,7 @@ class Agent:
 
         # Consolidate memories
         if self.long_term_memory is not None:
-            for action in self.actions:
-                self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
+            self.long_term_memory.consolidate(self.short_term_memory)
 
         # Train brain
         if self.train is not None:
@@ -233,7 +205,7 @@ class MFEC(Agent):
             expected_per_action[action] = expected
 
         # Decide whether to explore according to epsilon probability
-        explore = np.random.choice(np.arange(2), p=[1 - self.epsilon, self.epsilon])
+        explore = np.random.choice(np.arange(2), p=[1 - self.exploration_rate, self.exploration_rate])
 
         # Choose best action or explore
         action = expected_per_action.argmax() if not explore else np.random.choice(np.arange(self.actions.size))
@@ -248,16 +220,28 @@ class MFEC(Agent):
         # Start timing
         start_time = time.time()
 
+        # Default variables
+        if placeholders is None:
+            placeholders = {}
+        loss = None
+
         # Consolidate memories
         if self.long_term_memory is not None:
             for action in self.actions:
                 self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
 
+        # Train brain
+        if self.train is not None:
+            _, loss = self.brain.run(placeholders, [self.train, self.loss])
+
         # Measure time
         self.timer = time.time() - start_time
 
+        # Return loss
+        return loss
 
-class NEC(Agent):
+
+class NEC(MFEC):
     def act(self, scene):
         # Start timing
         start_time = time.time()
@@ -297,7 +281,7 @@ class NEC(Agent):
 
                     # Note if duplicate
                     if distance == 0:
-                        # Note duplicate and action  # TODO: Remember to perform a value update
+                        # Note duplicate and action
                         duplicate[action] = indices[i]
 
                     # Weight of each memory is inverse of distance
@@ -308,16 +292,13 @@ class NEC(Agent):
                     expected += self.long_term_memory[action].memories["value"][indices[i]] * weight
 
                 # Finish computing expected value
-                if duplicate[action] < 0:
-                    # expected /= num_similar_memories
-                    expected /= weights
-                    # expected = self.long_term_memory[action].tree.predict([scene])[0]
+                expected /= weights
 
             # Record expected value for this action
             expected_per_action[action] = expected
 
         # Decide whether to explore according to epsilon probability
-        explore = np.random.choice(np.arange(2), p=[1 - self.epsilon, self.epsilon])
+        explore = np.random.choice(np.arange(2), p=[1 - self.exploration_rate, self.exploration_rate])
 
         # Choose best action or explore
         action = expected_per_action.argmax() if not explore else np.random.choice(np.arange(self.actions.size))
@@ -327,30 +308,6 @@ class NEC(Agent):
 
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
-
-    def learn(self, placeholders=None):
-        # Start timing
-        start_time = time.time()
-
-        # Default variables
-        if placeholders is None:
-            placeholders = {}
-        loss = None
-
-        # Consolidate memories
-        if self.long_term_memory is not None:
-            for action in self.actions:
-                self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
-
-        # Train brain
-        if self.train is not None:
-            _, loss = self.brain.run(placeholders, [self.train, self.loss])
-
-        # Measure time
-        self.timer = time.time() - start_time
-
-        # Return loss
-        return loss
 
 
 class LSTMClassifier(Agent):

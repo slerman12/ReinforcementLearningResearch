@@ -7,11 +7,11 @@ from sklearn.neighbors.kd_tree import KDTree
 
 
 class Traces:
-    def __init__(self, capacity, attributes, memories, gamma):
+    def __init__(self, capacity, attributes, memories, reward_discount):
         # Initialize dict of traces
         self.traces = {}
 
-        # Arrays of memory traces for calculating values from rewards
+        # Arrays of memory traces for calculating values from rewards TODO: add support for >2D memory
         for attribute, dimensionality in attributes.items():
             if dimensionality > 1:
                 self.traces[attribute] = np.zeros((capacity, dimensionality))
@@ -31,7 +31,7 @@ class Traces:
         self.memories = memories
 
         # Reward discount
-        self.gamma = gamma
+        self.reward_discount = reward_discount
 
     def add(self, trace):
         # Reward of trace
@@ -43,7 +43,7 @@ class Traces:
         # Update values of existing traces except oldest
         # for i in range(1, self.length):
         for i in range(0, self.length):
-            self.traces["value"][i] += self.gamma ** (self.length - i) * reward
+            self.traces["value"][i] += self.reward_discount ** (self.length - i) * reward
 
         # If memory capacity has not been reached
         if self.length < self.capacity:
@@ -133,6 +133,9 @@ class Memories:
         # Consolidated memories
         self.tree = None
 
+        # Whether the memory has been modified since consolidation
+        self.modified = False
+
         # Number of duplicates
         self.num_duplicates = 0
 
@@ -151,6 +154,9 @@ class Memories:
             for attribute, dimensionality in self.attributes.items():
                 self.memories[attribute][least_recently_accessed] = memory[attribute]
 
+        # Modified
+        self.modified = True
+
     def retrieve(self, experience, k):
         # Retrieve k most similar memories #
         dist, ind = self.tree.query([experience], k=min(k, self.length))
@@ -159,9 +165,9 @@ class Memories:
         # Return memories
         return dist[0], ind[0]
 
-    def consolidate(self, short_term_memories):
+    def consolidate(self, short_term_memories=None, leaf_size=400, brain=None):
         # If there are short term memories available
-        if short_term_memories.length > 0:
+        if short_term_memories is not None:
             # Store short term memories
             for memory in range(short_term_memories.length):
                 self.store(short_term_memories.get_memory_by_index(memory), True)
@@ -169,14 +175,24 @@ class Memories:
             # Empty out short term memories
             short_term_memories.reset()
 
+        # Consolidate memory representations
+        if brain is not None:
+            self.memories["state"] = brain.run({"inputs": self.memories["raw_state"]}, brain.brain)
+            self.modified = True
+
+        # If memories in memory and modified, consolidate tree
+        if self.length > 0 and self.modified:
             # Build tree of long term memories
-            self.tree = KDTree(self.memories["state"][:self.length], leaf_size=400)
+            self.tree = KDTree(self.memories["state"][:self.length], leaf_size=leaf_size)
             # self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
             # self.tree = FLANN()
             # self.tree.build_index(self.memories[:self.length, :-num_attributes])
             # self.tree = KNeighborsRegressor(n_neighbors=min(50, self.length))
             # self.tree.fit(self.memories[:self.length, :-num_attributes],
             #               self.memories[:self.length, self.attributes["value"]])
+
+            # Modified
+            self.modified = False
 
     def get_memory_by_index(self, index):
         # Initialize memory
@@ -189,15 +205,30 @@ class Memories:
         # Return memory
         return memory
 
-    def reset(self):
+    def reset(self, population=None):
         # Reset internal states
         self.tree = None
         self.length = 0
+
+        # For each memory attribute
         for attribute, dimensionality in self.attributes.items():
-            if dimensionality > 1:
-                self.memories[attribute] = np.zeros((self.capacity, dimensionality))
+            # If no population provided
+            if population is None:
+                # Use default empty memories
+                if dimensionality > 1:
+                    self.memories[attribute] = np.zeros((self.capacity, dimensionality))
+                else:
+                    self.memories[attribute] = np.zeros(self.capacity)
             else:
-                self.memories[attribute] = np.zeros(self.capacity)
+                # Otherwise, set memories to population and verify dimensions
+                shape = population[attribute].shape
+                assert shape[1] == dimensionality if dimensionality > 1 else len(shape) == 1
+                self.memories[attribute] = population[attribute]
+                assert self.length == shape[0] or self.length == 0
+                self.length = shape[0]
+
+        # Modified
+        self.modified = True
 
 
 class MFEC(Memories):
@@ -220,6 +251,9 @@ class MFEC(Memories):
                 least_recently_accessed = np.argmin(self.memories["time_accessed"][:self.length])
                 for attribute, dimensionality in self.attributes.items():
                     self.memories[attribute][least_recently_accessed] = memory[attribute]
+
+            # Modified
+            self.modified = True
         else:
             # Increment duplicates counter
             self.num_duplicates += 1

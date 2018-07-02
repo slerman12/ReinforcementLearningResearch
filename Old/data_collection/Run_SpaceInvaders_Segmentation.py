@@ -148,11 +148,11 @@ short_term_memory = [Memories(capacity=episode_length, width=memory_width, attri
 
 # Reward traces
 traces = Traces(capacity=trace_length, width=memory_width, attributes=attributes, memories=short_term_memory,
-                gamma=0.999)
+                reward_discount=0.999)
 
 # Agent
 agent = Agent(vision=vision, long_term_memory=long_term_memory, short_term_memory=short_term_memory, traces=traces,
-              attributes=attributes, actions=action_space, epsilon=1, k=50)
+              attributes=attributes, actions=action_space, exploration_rate=1, k=50)
 
 # Main method
 if __name__ == "__main__":
@@ -194,7 +194,7 @@ if __name__ == "__main__":
             see_times += [agent.timer]
 
             # Set likelihood of picking a random action
-            agent.epsilon = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
+            agent.exploration_rate = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
 
             # Get action
             action, expected, duplicate = agent.act(scene=scene)
@@ -241,7 +241,7 @@ if __name__ == "__main__":
             metrics = {'Run-Through': run_through, 'Episode': episode + 1, 'State': num_states, 'Number of Steps': t,
                        'Memory Size': sum([long_term_memory[a].length for a in action_space]),
                        'Number of Duplicates': sum([long_term_memory[a].num_duplicates for a in action_space]),
-                       "K": agent.k, "Gamma": traces.gamma, "Epsilon": round(agent.epsilon, 3),
+                       "K": agent.k, "Gamma": traces.reward_discount, "Epsilon": round(agent.exploration_rate, 3),
                        'Episode Length': episode_length, 'Trace Length': trace_length,
                        'Mean See Time': np.mean(see_times), 'Mean Act Time': np.mean(act_times),
                        'Mean Experience Time': np.mean(experience_times), 'Mean Learn Time': np.mean(learn_times),
