@@ -310,14 +310,98 @@ class NEC(MFEC):
         return self.actions[action], expected_per_action[action], duplicate[action]
 
 
-class LSTMClassifier(Agent):
+class Classifier(Agent):
     def start_brain(self):
         # Use vision
         self.brain = self.vision.brain
 
         # Loss function
-        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
             logits=self.brain.components["logits"], labels=self.brain.placeholders["desired_outputs"]))
+
+        # Training
+        self.train = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"]).minimize(self.loss)
+
+        # Test accuracy
+        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
+            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
+
+        # For initializing variables
+        initialize_variables = tf.global_variables_initializer()
+
+        # Start session
+        self.session = tf.Session()
+
+        # Initialize variables
+        self.session.run(initialize_variables)
+
+        # Assign session to brain
+        self.brain.session = self.session
+
+
+class DynamicClassifier(Agent):
+    def start_brain(self):
+        # Use vision
+        self.brain = self.vision.brain
+
+        # Cross entropy
+        cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["outputs"])
+        cross_entropy = -tf.reduce_sum(cross_entropy, 2)
+
+        # Mask for canceling out padding in dynamic sequences
+        mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
+
+        # Explicit masking of loss (although unnecessary; just for code clarity)
+        cross_entropy *= mask
+
+        # Average over the correct sequence lengths (this is where the mask is used)
+        cross_entropy = tf.reduce_sum(cross_entropy, 1)
+        cross_entropy /= tf.reduce_sum(mask, 1)
+
+        # Average loss for each batch
+        self.loss = tf.reduce_mean(cross_entropy)
+
+        # Training
+        self.train = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"]).minimize(self.loss)
+
+        # Test accuracy
+        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
+            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
+
+        # For initializing variables
+        initialize_variables = tf.global_variables_initializer()
+
+        # Start session
+        self.session = tf.Session()
+
+        # Initialize variables
+        self.session.run(initialize_variables)
+
+        # Assign session to brain
+        self.brain.session = self.session
+
+
+class TruncatedDynamicClassifier(Agent):
+    def start_brain(self):
+        # Use vision
+        self.brain = self.vision.brain
+
+        # Cross entropy
+        cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["output"])
+        cross_entropy = -tf.reduce_sum(cross_entropy, 2)
+
+        # Mask for canceling out padding in dynamic sequences
+        mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
+
+        # Explicit masking of loss (although unnecessary; just for code clarity)
+        cross_entropy *= mask
+
+        # Average over the correct sequence lengths (this is where the mask is used)
+        cross_entropy = tf.reduce_sum(cross_entropy, 1)
+        cross_entropy /= tf.reduce_sum(mask, 1)
+
+        # Average loss for each batch
+        self.loss = tf.reduce_mean(cross_entropy)
 
         # Training
         self.train = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"]).minimize(self.loss)

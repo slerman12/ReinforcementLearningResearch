@@ -9,11 +9,11 @@ class Performance:
     metrics = {}
     filename = None
 
-    def __init__(self, metric_names, epoch, filename=None, print_output=True):
+    def __init__(self, metric_names, episodes_or_run_throughs_per_epoch, filename=None, print_output=True):
         # Initialize variables
         self.metric_names = metric_names
         self.filename = filename
-        self.epoch = epoch
+        self.episodes_or_run_throughs_per_epoch = episodes_or_run_throughs_per_epoch
         self.print_output = print_output
 
         # Empty metrics variable
@@ -30,11 +30,11 @@ class Performance:
     def measure_performance(self, performance):
         # Initialize progress
         if self.progress is None:
-            self.progress = Progress(0, self.epoch - 1, "Epoch", False)
+            self.progress = Progress(0, self.episodes_or_run_throughs_per_epoch - 1, "Epoch", False)
         else:
             # Set progress parameters
             self.progress.show = self.print_output
-            self.progress.progress_total = self.epoch
+            self.progress.progress_total = self.episodes_or_run_throughs_per_epoch
 
             # Reset progress if needed
             if self.progress.progress_complete == self.progress.progress_total:
@@ -48,19 +48,19 @@ class Performance:
         if self.progress is not None:
             self.progress.update_progress()
 
-    def output_performance(self, run_through, description=None, aggregation=mean, special_aggregation=None):
+    def output_performance(self, episode_or_run_through, description=None, aggregation=mean, special_aggregation=None):
         # Default no special aggregation
         if special_aggregation is None:
             special_aggregation = {}
 
         # End epoch
-        if run_through % self.epoch == 0 or run_through == 1:
+        if episode_or_run_through % self.episodes_or_run_throughs_per_epoch == 0 or episode_or_run_through == 1:
             # Print performance
             if self.print_output:
                 # Print description and epoch
                 if description is not None:
                     print(description)
-                print("Epochs: {}".format(run_through // self.epoch))
+                print("Epochs: {}".format(episode_or_run_through // self.episodes_or_run_throughs_per_epoch))
 
                 # Print metrics
                 for key in self.metrics:
@@ -85,9 +85,9 @@ class Performance:
 
         # Re-initialize progress
         if self.progress is None:
-            self.progress = Progress(0, self.epoch - 1, "Epoch", self.print_output)
+            self.progress = Progress(0, self.episodes_or_run_throughs_per_epoch - 1, "Epoch", self.print_output)
         else:
-            self.progress.progress_total = self.epoch
+            self.progress.progress_total = self.episodes_or_run_throughs_per_epoch
             self.progress.reset()
 
 

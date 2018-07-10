@@ -9,16 +9,16 @@ from tensorflow.examples.tutorials.mnist import input_data
 mnist = input_data.read_data_sets("Data", one_hot=True)
 
 # Brain parameters
-brain_parameters = dict(learning_rate=0.001, batch_size=128, num_input=28, timesteps=28, num_hidden=128, num_classes=10)
+brain_parameters = dict(learning_rate=0.001, batch_size=128, input_dim=28, timesteps=28, hidden_dim=128, output_dim=10)
 
 # Vision
-vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
+vision = Vision.Vision(brain=Brains.StaticLSTMOutputLast(brain_parameters))
 
 # Agent
-agent = Agent.LSTMClassifier(vision=vision)
+agent = Agent.Classifier(vision=vision)
 
 # Initialize metrics for measuring performance
-performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], epoch=200)
+performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], episodes_or_run_throughs_per_epoch=200)
 
 # Main method
 if __name__ == "__main__":
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
         # Reshape image to 28 x 28
         batch_inputs = batch_inputs.reshape((brain_parameters["batch_size"], brain_parameters["timesteps"],
-                                             brain_parameters["num_input"]))
+                                             brain_parameters["input_dim"]))
 
         # Train
         loss = agent.learn({"inputs": batch_inputs, "desired_outputs": batch_desired_outputs})
