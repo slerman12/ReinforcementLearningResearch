@@ -10,13 +10,14 @@ training = Data.ReadFables("Data/Aesop.txt")
 
 # Brain parameters
 brain_parameters = dict(learning_rate=0.01, input_dim=training.word_dim, hidden_dim=64, output_dim=training.word_dim,
-                        max_time_dim=training.max_fable_length, truncated_time_dim=5, batch_dim=64)
+                        max_time_dim=training.max_fable_length, truncated_time_dim=5, batch_dim=64,
+                        max_gradient_clip_norm=5)
 
 # Vision
 vision = Vision.Vision(brain=Brains.DynamicLSTM(brain_parameters))
 
 # Agent
-agent = Agent.TruncatedDynamicClassifier(vision=vision)
+agent = Agent.TruncatedBPTTClassifier(vision=vision)
 
 # Initialize metrics for measuring performance
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], run_throughs_per_epoch=200)

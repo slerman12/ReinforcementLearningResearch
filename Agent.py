@@ -338,20 +338,23 @@ class Classifier(Agent):
             self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
                 logits=self.brain.components["logits"], labels=self.brain.placeholders["desired_outputs"]))
 
-        # Trainable variables
-        trainable_variables = tf.trainable_variables()
-
-        # Gradient clip norm passed in as parameter or default to 5
-        clip_norm = self.brain.parameters["clip_norm"] if "clip_norm" in self.brain.parameters.keys() else 5
-
-        # Get gradients of loss and clip them according to norm
-        gradients, _ = tf.clip_by_global_norm(tf.gradients(ys=self.loss, xs=trainable_variables), clip_norm=clip_norm)
-
         # Training optimization method
         optimizer = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"])
 
-        # Training
-        self.train = optimizer.apply_gradients(zip(gradients, trainable_variables))
+        # If gradient clipping
+        if "max_gradient_clip_norm" in self.brain.parameters.keys():
+            # Trainable variables
+            trainable_variables = tf.trainable_variables()
+
+            # Get gradients of loss and clip them according to max gradient clip norm
+            gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, trainable_variables),
+                                                  self.brain.parameters["max_gradient_clip_norm"])
+
+            # Training
+            self.train = optimizer.apply_gradients(zip(gradients, trainable_variables))
+        else:
+            # Training
+            self.train = optimizer.minimize(self.loss)
 
         # Test accuracy
         self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
@@ -370,8 +373,11 @@ class Classifier(Agent):
         self.brain.session = self.session
 
 
-class TruncatedDynamicClassifier(Classifier):
+class TruncatedBPTTClassifier(Classifier):
     def learn(self, placeholders=None):
+        # Assert truncated time divides max time (since I haven't made the sequence padding automatic yet) TODO
+        assert self.brain.parameters["max_time_dim"] % self.brain.parameters["truncated_time_dim"] == 0
+
         # Start timing
         start_time = time.time()
 
@@ -383,7 +389,7 @@ class TruncatedDynamicClassifier(Classifier):
         # Initialize initial hidden state
         initial_state = self.brain.run(None, self.brain.placeholders["initial_state"])
 
-        # Initialize sequence subset boundaries truncated iteration
+        # Initialize sequence subset time boundaries for the truncated iteration
         sequence_subset_begin = 0
         sequence_subset_end = self.brain.parameters["truncated_time_dim"]
 
@@ -393,28 +399,35 @@ class TruncatedDynamicClassifier(Classifier):
         # Initialize loss
         loss = 0
 
-        # Truncated iteration through sequences
+        # Truncated iteration through each sequence
         while sequence_subset_begin < self.brain.parameters["max_time_dim"]:
             # Get sequence subsets
             inputs_subset = placeholders["inputs"][:, sequence_subset_begin:sequence_subset_end, :]
             desired_outputs_subset = placeholders["desired_outputs"][:, sequence_subset_begin:sequence_subset_end, :]
-            sequence_lengths_subset = np.maximum(np.minimum(placeholders["sequence_length"] -
-                                                            self.brain.parameters["truncated_time_dim"] *
-                                                            truncated_iterations,
-                                                            self.brain.parameters["truncated_time_dim"]), 0)
 
-            # If one of the sequences is all empty, break
-            # TODO: Bucket batches to prevent breaking unfinished sequences and take batch subsets here otherwise
-            if not inputs_subset.any(axis=2).any(axis=1).all():
-                break
+            # Placeholders for truncated iteration
+            subset_placeholders = {"inputs": inputs_subset, "desired_outputs": desired_outputs_subset,
+                                   "initial_state": initial_state}
+
+            # If input sequences have dynamic numbers of time dimensions
+            if "sequence_length" in placeholders:
+                # Update the dynamic lengths across each iteration's subsets
+                sequence_lengths_subset = np.maximum(np.minimum(placeholders["sequence_length"] -
+                                                                self.brain.parameters["truncated_time_dim"] *
+                                                                truncated_iterations,
+                                                                self.brain.parameters["truncated_time_dim"]), 0)
+
+                # If one of the sequences is all empty, break
+                # TODO: Bucket batches to prevent breaking unfinished sequences and take batch subsets here otherwise
+                if not inputs_subset.any(axis=2).any(axis=1).all():
+                    break
+
+                # Placeholders for truncated iteration
+                subset_placeholders["sequence_length"] = sequence_lengths_subset
 
             # Train
-            _, subset_loss, initial_state = self.brain.run({"inputs": inputs_subset,
-                                                            "desired_outputs": desired_outputs_subset,
-                                                            "sequence_length": sequence_lengths_subset,
-                                                            "initial_state": initial_state},
-                                                           [self.train, self.loss,
-                                                            self.brain.components["final_state"]])
+            _, subset_loss, initial_state = self.brain.run(subset_placeholders, [self.train, self.loss,
+                                                                                 self.brain.components["final_state"]])
 
             # Loss
             loss += subset_loss
