@@ -315,12 +315,43 @@ class Classifier(Agent):
         # Use vision
         self.brain = self.vision.brain
 
-        # Loss function
-        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
-            logits=self.brain.components["logits"], labels=self.brain.placeholders["desired_outputs"]))
+        # If inputs are sequences with dynamic numbers of time dimensions
+        if "sequence_length" in self.brain.placeholders.keys():
+            # Cross entropy
+            cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["output"])
+            cross_entropy = -tf.reduce_sum(cross_entropy, 2)
+
+            # Mask for canceling out padding in dynamic sequences
+            mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
+
+            # Explicit masking of loss (although unnecessary; just for code clarity)
+            cross_entropy *= mask
+
+            # Average over the correct sequence lengths (this is where the mask is used)
+            cross_entropy = tf.reduce_sum(cross_entropy, 1)
+            cross_entropy /= tf.reduce_sum(mask, 1)
+
+            # Average loss for each batch
+            self.loss = tf.reduce_mean(cross_entropy)
+        else:
+            # Softmax cross entropy
+            self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
+                logits=self.brain.components["logits"], labels=self.brain.placeholders["desired_outputs"]))
+
+        # Trainable variables
+        trainable_variables = tf.trainable_variables()
+
+        # Gradient clip norm passed in as parameter or default to 5
+        clip_norm = self.brain.parameters["clip_norm"] if "clip_norm" in self.brain.parameters.keys() else 5
+
+        # Get gradients of loss and clip them according to norm
+        gradients, _ = tf.clip_by_global_norm(tf.gradients(ys=self.loss, xs=trainable_variables), clip_norm=clip_norm)
+
+        # Training optimization method
+        optimizer = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"])
 
         # Training
-        self.train = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"]).minimize(self.loss)
+        self.train = optimizer.apply_gradients(zip(gradients, trainable_variables))
 
         # Test accuracy
         self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
@@ -339,85 +370,67 @@ class Classifier(Agent):
         self.brain.session = self.session
 
 
-class DynamicClassifier(Agent):
-    def start_brain(self):
-        # Use vision
-        self.brain = self.vision.brain
+class TruncatedDynamicClassifier(Classifier):
+    def learn(self, placeholders=None):
+        # Start timing
+        start_time = time.time()
 
-        # Cross entropy
-        cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["outputs"])
-        cross_entropy = -tf.reduce_sum(cross_entropy, 2)
+        # Consolidate memories
+        if self.long_term_memory is not None:
+            for action in self.actions:
+                self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
 
-        # Mask for canceling out padding in dynamic sequences
-        mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
+        # Initialize initial hidden state
+        initial_state = self.brain.run(None, self.brain.placeholders["initial_state"])
 
-        # Explicit masking of loss (although unnecessary; just for code clarity)
-        cross_entropy *= mask
+        # Initialize sequence subset boundaries truncated iteration
+        sequence_subset_begin = 0
+        sequence_subset_end = self.brain.parameters["truncated_time_dim"]
 
-        # Average over the correct sequence lengths (this is where the mask is used)
-        cross_entropy = tf.reduce_sum(cross_entropy, 1)
-        cross_entropy /= tf.reduce_sum(mask, 1)
+        # Counter of truncated iterations
+        truncated_iterations = 0
 
-        # Average loss for each batch
-        self.loss = tf.reduce_mean(cross_entropy)
+        # Initialize loss
+        loss = 0
 
-        # Training
-        self.train = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"]).minimize(self.loss)
+        # Truncated iteration through sequences
+        while sequence_subset_begin < self.brain.parameters["max_time_dim"]:
+            # Get sequence subsets
+            inputs_subset = placeholders["inputs"][:, sequence_subset_begin:sequence_subset_end, :]
+            desired_outputs_subset = placeholders["desired_outputs"][:, sequence_subset_begin:sequence_subset_end, :]
+            sequence_lengths_subset = np.maximum(np.minimum(placeholders["sequence_length"] -
+                                                            self.brain.parameters["truncated_time_dim"] *
+                                                            truncated_iterations,
+                                                            self.brain.parameters["truncated_time_dim"]), 0)
 
-        # Test accuracy
-        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
-            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
+            # If one of the sequences is all empty, break
+            # TODO: Bucket batches to prevent breaking unfinished sequences and take batch subsets here otherwise
+            if not inputs_subset.any(axis=2).any(axis=1).all():
+                break
 
-        # For initializing variables
-        initialize_variables = tf.global_variables_initializer()
+            # Train
+            _, subset_loss, initial_state = self.brain.run({"inputs": inputs_subset,
+                                                            "desired_outputs": desired_outputs_subset,
+                                                            "sequence_length": sequence_lengths_subset,
+                                                            "initial_state": initial_state},
+                                                           [self.train, self.loss,
+                                                            self.brain.components["final_state"]])
 
-        # Start session
-        self.session = tf.Session()
+            # Loss
+            loss += subset_loss
 
-        # Initialize variables
-        self.session.run(initialize_variables)
+            # Increment sequence subset boundaries
+            sequence_subset_begin += self.brain.parameters["truncated_time_dim"]
+            sequence_subset_end += self.brain.parameters["truncated_time_dim"]
 
-        # Assign session to brain
-        self.brain.session = self.session
+            # Increment truncated iterations counter
+            truncated_iterations += 1
 
+        # Normalize loss
+        loss /= truncated_iterations
 
-class TruncatedDynamicClassifier(Agent):
-    def start_brain(self):
-        # Use vision
-        self.brain = self.vision.brain
+        # Measure time
+        self.timer = time.time() - start_time
 
-        # Cross entropy
-        cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["output"])
-        cross_entropy = -tf.reduce_sum(cross_entropy, 2)
-
-        # Mask for canceling out padding in dynamic sequences
-        mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
-
-        # Explicit masking of loss (although unnecessary; just for code clarity)
-        cross_entropy *= mask
-
-        # Average over the correct sequence lengths (this is where the mask is used)
-        cross_entropy = tf.reduce_sum(cross_entropy, 1)
-        cross_entropy /= tf.reduce_sum(mask, 1)
-
-        # Average loss for each batch
-        self.loss = tf.reduce_mean(cross_entropy)
-
-        # Training
-        self.train = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"]).minimize(self.loss)
-
-        # Test accuracy
-        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
-            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
-
-        # For initializing variables
-        initialize_variables = tf.global_variables_initializer()
-
-        # Start session
-        self.session = tf.Session()
-
-        # Initialize variables
-        self.session.run(initialize_variables)
-
-        # Assign session to brain
-        self.brain.session = self.session
+        # Return loss
+        return loss

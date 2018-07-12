@@ -11,16 +11,16 @@ training = Data.ReadFables("Data/Aesop.txt")
 
 # Brain parameters
 brain_parameters = dict(learning_rate=0.01, input_dim=training.word_dim, hidden_dim=64, output_dim=training.word_dim,
-                        max_timesteps=training.max_fable_length)
+                        max_time_dim=training.max_fable_length, batch_dim=64)
 
 # Vision
 vision = Vision.Vision(brain=Brains.DynamicLSTM(brain_parameters))
 
 # Agent
-agent = Agent.DynamicClassifier(vision=vision)
+agent = Agent.Classifier(vision=vision)
 
 # Initialize metrics for measuring performance
-performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], episodes_or_run_throughs_per_epoch=200)
+performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], run_throughs_per_epoch=200)
 
 # Main method
 if __name__ == "__main__":
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     # Training iterations
     for episode in range(1, 10000 + 1):
         # Batch data
-        batch_inputs, batch_desired_outputs, batch_sequence_lengths = training.iterate_batch(batch_size=64)
+        batch_inputs, batch_desired_outputs, batch_sequence_lengths = training.iterate_batch(brain_parameters["batch_dim"])
 
         # Train
         loss = agent.learn({"inputs": batch_inputs, "desired_outputs": batch_desired_outputs,

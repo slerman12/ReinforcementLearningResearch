@@ -7,7 +7,7 @@ from Examples.LSTM.Data import Data
 
 
 # Brain parameters
-brain_parameters = dict(learning_rate=0.01, batch_size=128, input_dim=1, hidden_dim=64, output_dim=2)
+brain_parameters = dict(learning_rate=0.01, batch_dim=128, input_dim=1, hidden_dim=64, output_dim=2)
 
 training = Data.ToySequenceData(n_samples=1000, max_seq_len=20)
 testing = Data.ToySequenceData(n_samples=500, max_seq_len=20)
@@ -19,7 +19,7 @@ vision = Vision.Vision(brain=Brains.DynamicLSTMOutputLast(brain_parameters))
 agent = Agent.Classifier(vision=vision)
 
 # Initialize metrics for measuring performance
-performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], episodes_or_run_throughs_per_epoch=200)
+performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss"], run_throughs_per_epoch=200)
 
 # Main method
 if __name__ == "__main__":
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # Training iterations
     for episode in range(1, 10000 + 1):
         # Batch data
-        batch_inputs, batch_desired_outputs, batch_sequence_lengths = training.next(brain_parameters["batch_size"])
+        batch_inputs, batch_desired_outputs, batch_sequence_lengths = training.iterate_batch(brain_parameters["batch_dim"])
 
         # Train
         loss = agent.learn({"inputs": batch_inputs, "desired_outputs": batch_desired_outputs,

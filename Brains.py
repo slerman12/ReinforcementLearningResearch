@@ -1,6 +1,4 @@
 import tensorflow as tf
-from tensorflow.contrib import rnn
-from tensorflow.contrib import cudnn_rnn
 
 
 class Brains:
@@ -39,7 +37,7 @@ class Brains:
 class StaticLSTMOutputLast(Brains):
     def build(self):
         # Graph placeholders
-        inputs = tf.placeholder("float", [None, self.parameters["timesteps"], self.parameters["input_dim"]])
+        inputs = tf.placeholder("float", [None, self.parameters["time_dim"], self.parameters["input_dim"]])
         desired_outputs = tf.placeholder("float", [None, self.parameters["output_dim"]])
         self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs}
 
@@ -52,13 +50,13 @@ class StaticLSTMOutputLast(Brains):
         }
 
         # Split up inputs into tensors of batch_size x num_input
-        inputs = tf.unstack(inputs, self.parameters["timesteps"], 1)
+        inputs = tf.unstack(inputs, self.parameters["time_dim"], 1)
 
         # Layer of LSTM cells
-        lstm_layer = rnn.BasicLSTMCell(self.parameters["hidden_dim"], forget_bias=1.0)
+        lstm_layer = tf.contrib.rnn.BasicLSTMCell(self.parameters["hidden_dim"], forget_bias=1.0)
 
         # Outputs and states of lstm layer
-        outputs, states = rnn.static_rnn(lstm_layer, inputs, dtype=tf.float32)
+        outputs, states = tf.contrib.rnn.static_rnn(lstm_layer, inputs, dtype=tf.float32)
 
         # Logits
         logits = tf.matmul(outputs[-1], weights['output']) + biases['output']
@@ -90,7 +88,7 @@ class DynamicLSTMOutputLast(Brains):
         inputs = tf.transpose(inputs, [1, 0, 2])
 
         # Layer of LSTM cells
-        lstm_layer = rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"])
+        lstm_layer = tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"])
 
         # Outputs and states of lstm layer
         outputs, states = lstm_layer(inputs, dtype=tf.float32, sequence_length=sequence_length)
@@ -102,7 +100,7 @@ class DynamicLSTMOutputLast(Brains):
         # Stack outputs into batch_size x max_timesteps x input_dim
         outputs = tf.transpose(tf.stack(outputs), [1, 0, 2])
 
-        # Indexing the output of each lstm cell at the last time step
+        # Indexing the output of each lstm cell at the last time dimension
         outputs = tf.gather_nd(outputs, tf.stack([tf.range(tf.shape(outputs)[0]), sequence_length - 1], axis=1))
 
         # Logits
@@ -121,7 +119,10 @@ class DynamicLSTM(Brains):
         inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
         desired_outputs = tf.placeholder("float", [None, None, self.parameters["output_dim"]])
         sequence_length = tf.placeholder(tf.int32, [None])
-        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "sequence_length": sequence_length}
+        initial_state = (tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32),
+                         tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32))
+        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "sequence_length": sequence_length,
+                             "initial_state": initial_state}
 
         # Model parameters
         weights = {
@@ -131,74 +132,26 @@ class DynamicLSTM(Brains):
             'output': tf.Variable(tf.random_normal([self.parameters["output_dim"]]))
         }
 
-        # Transpose to timesteps x batch_size x num_input
+        # Transpose to time_dim x batch_dim x input_dim
         inputs = tf.transpose(inputs, [1, 0, 2])
 
         # Layer of LSTM cells
-        lstm_layer = rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"])
+        lstm_layer = tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"])
 
         # Outputs and states of lstm layer
-        outputs, states = lstm_layer(inputs, dtype=tf.float32, sequence_length=sequence_length)
+        outputs, final_states = lstm_layer(inputs, initial_state, tf.float32, sequence_length)
 
         # Dropout
         if "dropout" in self.parameters.keys():
             outputs = tf.nn.dropout(outputs, self.parameters["dropout"])
 
-        # Stack outputs into batch_size x max_timesteps x input_dim
+        # Stack outputs into batch_dim x truncated_time_dim x input_dim
         outputs = tf.transpose(tf.stack(outputs), [1, 0, 2])
 
         # Logits
         logits = tf.reshape(outputs, [-1, self.parameters["hidden_dim"]])
         logits = tf.matmul(logits, weights["output"]) + biases['output']
-        logits = tf.reshape(logits, [-1, self.parameters["max_timesteps"], self.parameters["output_dim"]])
-
-        # Activation
-        self.components = {"output": tf.nn.softmax(logits), "logits": logits}
-
-        # Brain
-        self.brain = self.components["output"]
-
-
-class TruncatedDynamicLSTM(Brains):
-    def build(self):
-        # Graph placeholders
-        inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        desired_outputs = tf.placeholder("float", [None, None, self.parameters["output_dim"]])
-        sequence_length = tf.placeholder(tf.int32, [None])
-        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "sequence_length": sequence_length}
-
-        # Model parameters
-        weights = {
-            'output': tf.Variable(tf.random_normal([self.parameters["hidden_dim"], self.parameters["output_dim"]]))
-        }
-        biases = {
-            'output': tf.Variable(tf.random_normal([self.parameters["output_dim"]]))
-        }
-
-        # Unstack to inputs of batch_size x num_input
-        # inputs = tf.unstack(inputs, self.parameters["truncated_timesteps"], 1)
-
-        # Layer of LSTM cells
-        lstm_layer = rnn.BasicLSTMCell(self.parameters["hidden_dim"])
-
-        initial_state = lstm_layer.zero_state(self.parameters["batch_size"], "float")
-        self.placeholders["initial_state"] = initial_state
-
-        # Iterate through truncated sequence
-        outputs, final_states = tf.nn.dynamic_rnn(lstm_layer, inputs, initial_state=initial_state,
-                                                  sequence_length=sequence_length)
-
-        # Dropout
-        if "dropout" in self.parameters.keys():
-            outputs = tf.nn.dropout(outputs, self.parameters["dropout"])
-
-        # Stack outputs into batch_size x truncated_timesteps x input_dim
-        outputs = tf.transpose(tf.stack(outputs), [1, 0, 2])
-
-        # Logits
-        logits = tf.reshape(outputs, [-1, self.parameters["hidden_dim"]])
-        logits = tf.matmul(logits, weights["output"]) + biases['output']
-        logits = tf.reshape(logits, [-1, self.parameters["truncated_timesteps"], self.parameters["output_dim"]])
+        logits = tf.reshape(logits, [self.parameters["batch_dim"], -1, self.parameters["output_dim"]])
 
         # Activation
         self.components = {"output": tf.nn.softmax(logits), "logits": logits, "final_state": final_states}
