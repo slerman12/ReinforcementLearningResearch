@@ -11,7 +11,7 @@ training = Data.ReadFables("Data/Aesop.txt")
 
 # Brain parameters
 brain_parameters = dict(learning_rate=0.01, input_dim=training.word_dim, hidden_dim=64, output_dim=training.word_dim,
-                        max_time_dim=training.max_fable_length, batch_dim=64)
+                        max_time_dim=training.max_fable_length, batch_dim=64, max_gradient_clip_norm=5)
 
 # Vision
 vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
@@ -42,15 +42,6 @@ if __name__ == "__main__":
 
         # Display performance
         performance.output_performance(run_through=episode, special_aggregation={"Episode": lambda x: x[-1]})
-
-    # Testing data
-    # test_data = testing.data
-    # test_label = testing.labels
-    # test_sequence_length = testing.seqlen
-    #
-    # # Print testing accuracy
-    # print("Testing Accuracy:", agent.brain.run({"inputs": test_data, "desired_outputs": test_label,
-    #                                             "sequence_length": test_sequence_length}, agent.accuracy))
 
     # Stop agent
     agent.stop_brain()

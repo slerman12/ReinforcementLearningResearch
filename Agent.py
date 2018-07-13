@@ -315,10 +315,10 @@ class Classifier(Agent):
         # Use vision
         self.brain = self.vision.brain
 
-        # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly was to check that) TODO
-        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.components["output"].shape.as_list()) == 3:
+        # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.components["outputs"].shape.as_list()) > 2:
             # Cross entropy
-            cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["output"])
+            cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["outputs"])
             cross_entropy = -tf.reduce_sum(cross_entropy, 2)
 
             # Mask for canceling out padding in dynamic sequences

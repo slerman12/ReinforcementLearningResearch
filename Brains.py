@@ -34,7 +34,7 @@ class Brains:
         pass
 
 
-# An LSTM whose output is its last time step only
+# An LSTM whose output is its last time step's output only
 class LSTMOutputLast(Brains):
     def build(self):
         # Graph placeholders
@@ -72,10 +72,10 @@ class LSTMOutputLast(Brains):
         logits = tf.matmul(outputs, weights['output']) + biases['output']
 
         # Activation
-        self.components = {"output": tf.nn.softmax(logits), "logits": logits}
+        self.components = {"outputs": tf.nn.softmax(logits), "logits": logits}
 
         # Brain
-        self.brain = self.components["output"]
+        self.brain = self.components["outputs"]
 
 
 class LSTM(Brains):
@@ -110,7 +110,7 @@ class LSTM(Brains):
         if "dropout" in self.parameters.keys():
             outputs = tf.nn.dropout(outputs, self.parameters["dropout"])
 
-        # Stack outputs into batch_dim x truncated_time_dim x input_dim
+        # Stack outputs into batch_dim x time_dim x input_dim
         outputs = tf.transpose(tf.stack(outputs), [1, 0, 2])
 
         # Logits
@@ -119,7 +119,7 @@ class LSTM(Brains):
         logits = tf.reshape(logits, [self.parameters["batch_dim"], -1, self.parameters["output_dim"]])
 
         # Activation
-        self.components = {"output": tf.nn.softmax(logits), "logits": logits, "final_state": final_states}
+        self.components = {"outputs": tf.nn.softmax(logits), "logits": logits, "final_state": final_states}
 
         # Brain
-        self.brain = self.components["output"]
+        self.brain = self.components["outputs"]

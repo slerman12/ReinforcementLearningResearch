@@ -5,6 +5,7 @@ import Agent
 import Brains
 from tensorflow.examples.tutorials.mnist import input_data
 
+
 # MNIST data
 mnist = input_data.read_data_sets("Data", one_hot=True)
 

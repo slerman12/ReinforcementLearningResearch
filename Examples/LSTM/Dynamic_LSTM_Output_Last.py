@@ -41,14 +41,5 @@ if __name__ == "__main__":
         # Display performance
         performance.output_performance(episode, aggregation=lambda x: x[-1])
 
-    # Testing data
-    test_data = testing.data
-    test_label = testing.labels
-    test_sequence_length = testing.seqlen
-
-    # Print testing accuracy
-    print("Testing Accuracy:", agent.brain.run({"inputs": test_data, "desired_outputs": test_label,
-                                                "sequence_length": test_sequence_length}, agent.accuracy))
-
     # Stop agent
     agent.stop_brain()
