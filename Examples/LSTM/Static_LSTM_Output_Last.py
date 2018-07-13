@@ -12,7 +12,7 @@ mnist = input_data.read_data_sets("Data", one_hot=True)
 brain_parameters = dict(learning_rate=0.001, batch_dim=128, input_dim=28, time_dim=28, hidden_dim=128, output_dim=10)
 
 # Vision
-vision = Vision.Vision(brain=Brains.StaticLSTMOutputLast(brain_parameters))
+vision = Vision.Vision(brain=Brains.LSTMOutputLast(brain_parameters))
 
 # Agent
 agent = Agent.Classifier(vision=vision)

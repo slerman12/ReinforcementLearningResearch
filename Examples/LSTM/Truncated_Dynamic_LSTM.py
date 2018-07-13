@@ -5,6 +5,7 @@ import Agent
 import Brains
 from Examples.LSTM.Data import Data
 
+
 # Training data
 training = Data.ReadFables("Data/Aesop.txt")
 
@@ -14,7 +15,7 @@ brain_parameters = dict(learning_rate=0.01, input_dim=training.word_dim, hidden_
                         max_gradient_clip_norm=5)
 
 # Vision
-vision = Vision.Vision(brain=Brains.DynamicLSTM(brain_parameters))
+vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
 
 # Agent
 agent = Agent.TruncatedBPTTClassifier(vision=vision)

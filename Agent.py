@@ -315,8 +315,8 @@ class Classifier(Agent):
         # Use vision
         self.brain = self.vision.brain
 
-        # If inputs are sequences with dynamic numbers of time dimensions
-        if "sequence_length" in self.brain.placeholders.keys():
+        # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly was to check that) TODO
+        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.components["output"].shape.as_list()) == 3:
             # Cross entropy
             cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["output"])
             cross_entropy = -tf.reduce_sum(cross_entropy, 2)
@@ -375,8 +375,12 @@ class Classifier(Agent):
 
 class TruncatedBPTTClassifier(Classifier):
     def learn(self, placeholders=None):
-        # Assert truncated time divides max time (since I haven't made the sequence padding automatic yet) TODO
-        assert self.brain.parameters["max_time_dim"] % self.brain.parameters["truncated_time_dim"] == 0
+        # Allow total time parameter to be called either max_time_dim or time_dim
+        total_time = self.brain.parameters["time_dim"] if "time_dim" in self.brain.parameters.keys() \
+            else self.brain.parameters["max_time_dim"]
+
+        # Assert truncated time divides total time (since I haven't made the sequence padding automatic yet) TODO
+        assert total_time % self.brain.parameters["truncated_time_dim"] == 0
 
         # Start timing
         start_time = time.time()
@@ -400,7 +404,7 @@ class TruncatedBPTTClassifier(Classifier):
         loss = 0
 
         # Truncated iteration through each sequence
-        while sequence_subset_begin < self.brain.parameters["max_time_dim"]:
+        while sequence_subset_begin < total_time:
             # Get sequence subsets
             inputs_subset = placeholders["inputs"][:, sequence_subset_begin:sequence_subset_end, :]
             desired_outputs_subset = placeholders["desired_outputs"][:, sequence_subset_begin:sequence_subset_end, :]
@@ -410,7 +414,7 @@ class TruncatedBPTTClassifier(Classifier):
                                    "initial_state": initial_state}
 
             # If input sequences have dynamic numbers of time dimensions
-            if "sequence_length" in placeholders:
+            if "max_time_dim" in self.brain.parameters.keys():
                 # Update the dynamic lengths across each iteration's subsets
                 sequence_lengths_subset = np.maximum(np.minimum(placeholders["sequence_length"] -
                                                                 self.brain.parameters["truncated_time_dim"] *

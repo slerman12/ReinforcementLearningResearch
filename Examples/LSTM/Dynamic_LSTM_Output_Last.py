@@ -7,13 +7,13 @@ from Examples.LSTM.Data import Data
 
 
 # Brain parameters
-brain_parameters = dict(learning_rate=0.01, batch_dim=128, input_dim=1, hidden_dim=64, output_dim=2)
+brain_parameters = dict(learning_rate=0.01, batch_dim=128, input_dim=1, hidden_dim=64, output_dim=2, max_time_dim=20)
 
-training = Data.ToySequenceData(n_samples=1000, max_seq_len=20)
-testing = Data.ToySequenceData(n_samples=500, max_seq_len=20)
+training = Data.ToySequenceData(n_samples=1000, max_seq_len=brain_parameters["max_time_dim"])
+testing = Data.ToySequenceData(n_samples=500, max_seq_len=brain_parameters["max_time_dim"])
 
 # Vision
-vision = Vision.Vision(brain=Brains.DynamicLSTMOutputLast(brain_parameters))
+vision = Vision.Vision(brain=Brains.LSTMOutputLast(brain_parameters))
 
 # Agent
 agent = Agent.Classifier(vision=vision)
