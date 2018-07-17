@@ -148,7 +148,7 @@ filename = "Results/{}_{}_{}___{}.csv".format(filename_prefix, env_name, datetim
 performance = Performance.Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size',
                                        'Number of Duplicates', 'K', 'Gamma', 'Epsilon', 'Max Episode Length',
                                        'Trace Length', 'Mean See Time', 'Mean Act Time', 'Mean Experience Time',
-                                       'Mean Learn Time', 'Mean Episode Time', 'Reward'], epoch, filename)
+                                       'Mean Learn Time', 'Mean Episode Time', 'Mean Reward'], epoch, filename)
 
 # Main method
 if __name__ == "__main__":
@@ -244,11 +244,15 @@ if __name__ == "__main__":
                        'Max Episode Length': max_episode_length, 'Trace Length': trace_length,
                        'Mean See Time': np.mean(see_times), 'Mean Act Time': np.mean(act_times),
                        'Mean Experience Time': np.mean(experience_times), 'Mean Learn Time': np.mean(learn_times),
-                       'Mean Episode Time': np.mean(episode_times), 'Reward': run_through_reward}
+                       'Mean Episode Time': np.mean(episode_times), 'Mean Reward': run_through_reward}
             performance.measure_performance(metrics)
 
             # Output performance per epoch
-            performance.output_performance(run_through, env_name)
+            performance.output_performance(run_through, env_name, 
+                                           special_aggregation={metric: lambda x: x[-1] for metric in 
+                                                                ["Run-Through", "Episode", "State", "Number of Steps", 
+                                                                 "Memory Size", "Number of Duplicates", "K", "Gamma", 
+                                                                 "Epsilon", "Max Episode Length", "Trace Length"]})
 
             # Reset environment and measurement variables
             state = env.reset()

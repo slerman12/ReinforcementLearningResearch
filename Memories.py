@@ -1,7 +1,7 @@
 from __future__ import division
 import math
 import numpy as np
-from pyflann.index import FLANN
+# from pyflann.index import FLANN
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neighbors.kd_tree import KDTree
 

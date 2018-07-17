@@ -316,27 +316,27 @@ class Classifier(Agent):
         self.brain = self.vision.brain
 
         # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
-        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.components["outputs"].shape.as_list()) > 2:
+        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.brain.shape.as_list()) > 2:
             # Cross entropy
-            cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(self.brain.components["outputs"])
+            cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(tf.nn.softmax(self.brain.brain))
             cross_entropy = -tf.reduce_sum(cross_entropy, 2)
 
             # Mask for canceling out padding in dynamic sequences
             mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
 
-            # Explicit masking of loss (although unnecessary; just for code clarity)
+            # Explicit masking of loss (necessary in case a bias was added to the padding!)
             cross_entropy *= mask
 
             # Average over the correct sequence lengths (this is where the mask is used)
             cross_entropy = tf.reduce_sum(cross_entropy, 1)
             cross_entropy /= tf.reduce_sum(mask, 1)
 
-            # Average loss for each batch
+            # Average loss over each batch
             self.loss = tf.reduce_mean(cross_entropy)
         else:
             # Softmax cross entropy
             self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
-                logits=self.brain.components["logits"], labels=self.brain.placeholders["desired_outputs"]))
+                logits=self.brain.brain, labels=self.brain.placeholders["desired_outputs"]))
 
         # Training optimization method
         optimizer = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"])
@@ -451,3 +451,61 @@ class TruncatedBPTTClassifier(Classifier):
 
         # Return loss
         return loss
+
+
+class Regressor(Agent):
+    def start_brain(self):
+        # Use vision
+        self.brain = self.vision.brain
+
+        # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.brain.shape.as_list()) > 2:
+            # Mean squared difference
+            mean_squared_difference = tf.reduce_mean(
+                tf.squared_difference(self.brain.brain, self.brain.placeholders["desired_outputs"]), axis=2)
+
+            # Mask for canceling out padding in dynamic sequences
+            mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
+
+            # Explicit masking of loss (necessary in case a bias was added to the padding!)
+            mean_squared_difference *= mask
+
+            # Average loss over each (padded) sequence and batch
+            self.loss = tf.reduce_mean(tf.reduce_sum(mean_squared_difference, 1) / tf.reduce_sum(mask, 1))
+        else:
+            # Mean squared error
+            self.loss = tf.losses.mean_squared_error(self.brain.placeholders["desired_outputs"], self.brain.brain)
+
+        # Training optimization method
+        optimizer = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"])
+
+        # If gradient clipping
+        if "max_gradient_clip_norm" in self.brain.parameters.keys():
+            # Trainable variables
+            trainable_variables = tf.trainable_variables()
+
+            # Get gradients of loss and clip them according to max gradient clip norm
+            gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, trainable_variables),
+                                                  self.brain.parameters["max_gradient_clip_norm"])
+
+            # Training
+            self.train = optimizer.apply_gradients(zip(gradients, trainable_variables))
+        else:
+            # Training
+            self.train = optimizer.minimize(self.loss)
+
+        # Test accuracy
+        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
+            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
+
+        # For initializing variables
+        initialize_variables = tf.global_variables_initializer()
+
+        # Start session
+        self.session = tf.Session()
+
+        # Initialize variables
+        self.session.run(initialize_variables)
+
+        # Assign session to brain
+        self.brain.session = self.session

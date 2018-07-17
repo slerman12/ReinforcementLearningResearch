@@ -69,10 +69,10 @@ class LSTMOutputLast(Brains):
             if "max_time_dim" in self.parameters.keys() else outputs[-1]
 
         # Logits
-        logits = tf.matmul(outputs, weights['output']) + biases['output']
+        outputs = tf.matmul(outputs, weights['output']) + biases['output']
 
-        # Activation
-        self.components = {"outputs": tf.nn.softmax(logits), "logits": logits}
+        # Components
+        self.components = {"outputs": outputs}
 
         # Brain
         self.brain = self.components["outputs"]
@@ -81,8 +81,8 @@ class LSTMOutputLast(Brains):
 class LSTM(Brains):
     def build(self):
         # Graph placeholders
-        inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        desired_outputs = tf.placeholder("float", [None, None, self.parameters["output_dim"]])
+        inputs = tf.placeholder("float", [self.parameters["batch_dim"], None, self.parameters["input_dim"]])
+        desired_outputs = tf.placeholder("float", [self.parameters["batch_dim"], None, self.parameters["output_dim"]])
         initial_state = (tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32),
                          tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32))
         sequence_length = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters.keys() else None
@@ -110,16 +110,17 @@ class LSTM(Brains):
         if "dropout" in self.parameters.keys():
             outputs = tf.nn.dropout(outputs, self.parameters["dropout"])
 
-        # Stack outputs into batch_dim x time_dim x input_dim
+        # Stack outputs into batch_dim x time_dim x output_dim
         outputs = tf.transpose(tf.stack(outputs), [1, 0, 2])
 
-        # Logits
-        logits = tf.reshape(outputs, [-1, self.parameters["hidden_dim"]])
-        logits = tf.matmul(logits, weights["output"]) + biases['output']
-        logits = tf.reshape(logits, [self.parameters["batch_dim"], -1, self.parameters["output_dim"]])
+        # Dense layer (careful: bias corrupts padding! Hence mask is needed)
+        # outputs = tf.reshape(outputs, [-1, self.parameters["hidden_dim"]])
+        # outputs = tf.matmul(outputs, weights["output"]) + biases['output']
+        # outputs = tf.reshape(outputs, [self.parameters["batch_dim"], -1, self.parameters["output_dim"]])
+        outputs = tf.einsum('aij,jk->aik', outputs, weights["output"]) + biases['output']
 
-        # Activation
-        self.components = {"outputs": tf.nn.softmax(logits), "logits": logits, "final_state": final_states}
+        # Components
+        self.components = {"outputs": outputs, "final_state": final_states}
 
         # Brain
         self.brain = self.components["outputs"]

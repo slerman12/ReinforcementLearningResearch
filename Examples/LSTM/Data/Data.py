@@ -56,8 +56,7 @@ class ReadFables:
 
             # Desired outputs + padding
             desired_outputs = np.zeros((self.max_fable_length, self.word_dim), dtype=np.int32)
-            desired_outputs[:length] = words[:-1]
-
+            desired_outputs[:length] = words[1:]
             # Fables
             self.fables.append({"inputs": inputs, "desired_outputs": desired_outputs, "length": length})
 
