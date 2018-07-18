@@ -40,6 +40,7 @@ class Agent:
             self.brain = self.vision.brain
 
     def stop_brain(self):
+        # Close tensorflow session
         tf.Session.close(self.session)
 
     def see(self, state):
@@ -93,6 +94,7 @@ class Agent:
                     weights += weight
 
         # Decide whether to explore according to epsilon probability
+        # explore = 1 if random.random() < self.exploration_rate else 0
         explore = np.random.choice(np.arange(2), p=[1 - self.exploration_rate, self.exploration_rate])
 
         # Measure time
@@ -477,7 +479,7 @@ class Regressor(Agent):
             self.loss = tf.losses.mean_squared_error(self.brain.placeholders["desired_outputs"], self.brain.brain)
 
         # Training optimization method
-        optimizer = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"])
+        optimizer = tf.train.AdamOptimizer(self.brain.parameters["learning_rate"])
 
         # If gradient clipping
         if "max_gradient_clip_norm" in self.brain.parameters.keys():

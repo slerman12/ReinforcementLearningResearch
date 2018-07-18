@@ -1,6 +1,5 @@
 from __future__ import division
 import Performance
-import Vision
 import Memories
 import Agent
 import numpy as np
@@ -13,127 +12,26 @@ env_name = 'CartPole-v0'
 env = gym.make(env_name)
 action_space = np.arange(env.action_space.n)
 state_space = env.observation_space.shape[0]
+
+# Parameters
 max_episode_length = 200
 max_run_through_length = 200
 trace_length = 200
 epoch = 100
-vision = None
-
-# Environment
-# env_name = 'Pong-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 3
-# crop = [35, 18, 0, 0]
-# size = (80, 80)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 5
-# max_run_through_length = 100000
-# max_episode_length = 10000
-# trace_length = 250
-# trajectory = True
-# state_space = objects * 5 if trajectory else objects * 3
-
-# Environment
-# env_name = 'Riverraid-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 30
-# crop = [5, 50, 10, 10]
-# size = (70, 90)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 5
-# max_run_through_length = 1000000
-# episode_length = 250
-# trace_length = 250
-# trajectory = True
-# state_space = objects * 5 if trajectory else objects * 3
-
-# Environment
-# env_name = 'Breakout-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 30
-# crop = [40, 20, 10, 10]
-# size = (80, 80)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 5
-# max_run_through_length = 1000000
-# episode_length = 250
-# trace_length = 250
-# trajectory = True
-# state_space = objects * 5 if trajectory else objects * 3
-
-# Environment
-# env_name = 'SpaceInvaders-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 44
-# crop = [20, 15, 0, 0]
-# size = (80, 80)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 3
-# max_run_through_length = 10000
-# episode_length = 250
-# trace_length = 250
-# trajectory = True
-# state_space = objects * 5 if trajectory else objects * 3
-
-# Environment
-# env_name = 'Bowling-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 20
-# crop = [110, 40, 0, 0]
-# size = (100, 40)
-# scale = 900
-# sigma = 0.03
-# min_size = 1
-# epoch = 5
-# max_run_through_length = 1000000
-# episode_length = 250
-# trace_length = 250
-# trajectory = False
-# state_space = objects * 5 if trajectory else objects * 3
-
-# Environment
-# env_name = 'MsPacman-v0'
-# env = gym.make(env_name)
-# action_space = np.arange(env.action_space.n)
-# objects = 300
-# crop = [5, 40, 0, 0]
-# size = (80, 80)
-# scale = 10000.0
-# sigma = 0.001
-# min_size = 1
-# epoch = 3
-# max_run_through_length = 10000
-# episode_length = 250
-# trace_length = 250
-# state_space = objects * 5
-
-# Visual model
-# vision = Vision(object_capacity=objects, params=[scale, sigma, min_size], crop=crop, size=size, trajectory=trajectory)
-# vision = RandomProjection(dimension=64, flatten=True, size=size, greyscale=True, crop=crop)
-# state_space = 64
 
 # Attributes
 attributes = dict(scene=state_space, action=1, reward=1, value=1, expected=1, duplicate=1, terminal=1, time_accessed=1)
+
+# Vision
+vision = None
 
 # Memories
 long_term_memory = [Memories.MFEC(capacity=400000, attributes=attributes) for _ in action_space]
 short_term_memory = [Memories.MFEC(capacity=max_episode_length, attributes=attributes) for _ in action_space]
 
 # Reward traces
-traces = Memories.Traces(capacity=trace_length, attributes=attributes, memories=short_term_memory, reward_discount=0.999)
+traces = Memories.Traces(capacity=trace_length, attributes=attributes, memories=short_term_memory,
+                         reward_discount=0.999)
 
 # Agent TODO: add Memory Agent (policy-based memory rather than value), prioritized experience, & value updates
 agent = Agent.NEC(vision=vision, long_term_memory=long_term_memory, short_term_memory=short_term_memory,
@@ -141,8 +39,8 @@ agent = Agent.NEC(vision=vision, long_term_memory=long_term_memory, short_term_m
 
 # File name
 filename_prefix = "Agent"
-filename = "Results/{}_{}_{}___{}.csv".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
-                                              datetime.datetime.now().strftime('%H_%M'))
+filename = "{}_{}_{}___{}.csv".format(filename_prefix, env_name, datetime.datetime.today().strftime('%m_%d_%y'),
+                                      datetime.datetime.now().strftime('%H_%M'))
 
 # Initialize metrics for measuring performance TODO: Add model saving
 performance = Performance.Performance(['Run-Through', 'Episode', 'State', 'Number of Steps', 'Memory Size',
@@ -175,23 +73,14 @@ if __name__ == "__main__":
             total_steps += 1
             run_through_step += 1
 
-            # Display environment
-            # if run_through > 5:
-            # env.render()
-
             # Get scene from visual model
             scene = agent.see(state)
-
-            # Show segmentation
-            # if t > 90:
-            #     agent.vision.plot()
 
             # Measure performance
             see_times += [agent.timer]
 
             # Set likelihood of picking a random action
             agent.exploration_rate = max(min(100000 / (episode + 1) ** 3, 1), 0.001)
-            # agent.epsilon = max(1 / (episode + 1), 0.001)
 
             # Get action
             action, expected, duplicate = agent.act(scene=scene)
@@ -248,10 +137,10 @@ if __name__ == "__main__":
             performance.measure_performance(metrics)
 
             # Output performance per epoch
-            performance.output_performance(run_through, env_name, 
-                                           special_aggregation={metric: lambda x: x[-1] for metric in 
-                                                                ["Run-Through", "Episode", "State", "Number of Steps", 
-                                                                 "Memory Size", "Number of Duplicates", "K", "Gamma", 
+            performance.output_performance(run_through, env_name,
+                                           special_aggregation={metric: lambda x: x[-1] for metric in
+                                                                ["Run-Through", "Episode", "State", "Number of Steps",
+                                                                 "Memory Size", "Number of Duplicates", "K", "Gamma",
                                                                  "Epsilon", "Max Episode Length", "Trace Length"]})
 
             # Reset environment and measurement variables

@@ -11,7 +11,7 @@ class ReadPD:
         file = pd.read_csv(filename)
 
         # Default drop list
-        to_drop = ["PATNO"] if to_drop is None else ["PATNO"] + to_drop
+        to_drop = ["PATNO", "INFODT"] if to_drop is None else ["PATNO", "INFODT"] + to_drop
 
         # Data
         self.PD_Data = []
@@ -33,8 +33,8 @@ class ReadPD:
 
         # List of inputs, desired outputs, and sequence lengths
         for patient in file["PATNO"].unique():
-            # All patient records
-            patient_records = file[file["PATNO"] == patient].drop(to_drop, axis=1)
+            # All patient records (sorted by date-time)
+            patient_records = file[file["PATNO"] == patient].sort_values(["INFODT"]).drop(to_drop, axis=1)
 
             # Sequence lengths
             length = patient_records.shape[0] - 1
@@ -156,6 +156,8 @@ def impute(data):
     data.loc[data["tTau"] == "<80", "tTau"] = 50
     data.loc[data["pTau"] == "<8", "pTau"] = 5
 
+    print("\nManually imputed tTau '<80' token with 50 and pTau '<8' with 5")
+
     # for column in data.columns.values:
     #     if data[column].isnull().any():
     #         if column in ["Serum Glucose", "ALT (SGPT)", "Serum Bicarbonate", "Albumin-QT", "Total Bilirubin",
@@ -172,9 +174,14 @@ def impute(data):
                          "AST (SGOT)", "tTau", "pTau", "LAMB2(rep2)", "LAMB2(rep1)", "PSMC4(rep1)", "SKP1(rep1)",
                          "GAPDH(rep1)", "HSPA8(rep1)", "ALDH1A1(rep1)"]
 
+    print("\nManually replaced 'undetermined' token with nan")
+
     # Coerce to numeric those numerics mixed with strings
     for column in coerce_to_numeric:
         data[column] = pd.to_numeric(data[column], "coerce")
+
+    # Date-time
+    data["INFODT"] = pd.to_datetime(data["INFODT"])
 
     # Interpolation by previous or next per patient
     interpolated = data.groupby('PATNO').apply(lambda group: group.fillna(method="ffill").fillna(method="bfill"))
@@ -202,7 +209,7 @@ def encode(data):
         data[column] = pd.to_numeric(data[column], "ignore")
 
     # List of non-numeric variables
-    variables_to_encode = [item for item in data.columns.values if item not in list(
+    variables_to_encode = [item for item in data.columns.values if item != "INFODT" and item not in list(
         data.select_dtypes(include=['int16', 'int32', 'int64', 'float16', 'float32', 'float64']).columns.values)]
 
     print("\nVariables converted to one-hot binary dummies:")
@@ -219,9 +226,7 @@ def encode(data):
 
 
 # Process data
-def process(filename, to_drop):
-    # Get data
-    data = pd.read_csv(filename)
+def process(data, to_drop):
 
     # Drop
     dropped = drop(data, to_drop)
@@ -242,13 +247,15 @@ def process(filename, to_drop):
 
 # Main method
 if __name__ == "__main__":
-    # Preprocessed data
-    preprocessed = "Preprocessed/preprocessed_data_treated_and_untreated_off_PD_GENPD_REGPD.csv"  # TODO: on & off dose
+    # Preprocessed data  TODO: on & off dose
+    preprocessed = pd.read_csv("Preprocessed/preprocessed_data_treated_and_untreated_off_PD_GENPD_REGPD.csv")
+
+    print("Treated and untreated off dose measurements, PD GENPD REGPD cohorts")
 
     # Variables to drop
     variables_to_drop = ["EVENT_ID", "GENDER", "GENDER.y", "SXDT", "PDDXDT", "SXDT_x",
-                         "PDDXDT_x", "BIRTHDT.x", "INFODT", "INFODT_2", "ENROLL_DATE",
-                         "INITMDDT", "INITMDVS", "UPDRS_II_AND_III"]
+                         "PDDXDT_x", "BIRTHDT.x", "INFODT_2", "ENROLL_DATE",
+                         "INITMDDT", "INITMDVS"]
 
     # Data processing
     process(preprocessed, variables_to_drop)

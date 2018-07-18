@@ -10,8 +10,10 @@ import numpy as np
 training = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"])
 
 # Brain parameters
-brain_parameters = dict(learning_rate=0.01, input_dim=training.input_dim, output_dim=training.desired_output_dim,
-                        hidden_dim=64, max_time_dim=training.max_num_records, batch_dim=64, max_gradient_clip_norm=5)
+brain_parameters = dict(learning_rate=0.0001, input_dim=training.input_dim, output_dim=training.desired_output_dim,
+                        hidden_dim=1028, max_time_dim=training.max_num_records, batch_dim=32, max_gradient_clip_norm=5)
+
+print(brain_parameters)
 
 # Vision
 vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
@@ -20,8 +22,8 @@ vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
 agent = Agent.Regressor(vision=vision)
 
 # Initialize metrics for measuring performance
-performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss", "Root Mean Squared Error"],
-                                      run_throughs_per_epoch=200)
+performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Loss (MSE)", "RMSE"],
+                                      run_throughs_per_epoch=len(training.PD_Data) // brain_parameters["batch_dim"])
 
 # Main method
 if __name__ == "__main__":
@@ -39,8 +41,8 @@ if __name__ == "__main__":
                             "sequence_length": batch_sequence_lengths})
 
         # Measure performance
-        performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Loss": loss,
-                                         "Root Mean Squared Error": np.sqrt(loss)})
+        performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Loss (MSE)": loss,
+                                         "RMSE": np.sqrt(loss)})
 
         # Display performance
         performance.output_performance(run_through=episode, special_aggregation={"Episode": lambda x: x[-1]})

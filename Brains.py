@@ -2,9 +2,12 @@ import tensorflow as tf
 
 
 class Brains:
-    def __init__(self, parameters):
+    def __init__(self, parameters, pytorch=False):
         # Initialize brain 
         self.brain = None
+
+        # If pytorch
+        self.pytorch = pytorch
 
         # Initialize session
         self.session = None
@@ -102,11 +105,12 @@ class LSTM(Brains):
 
         # Layer of LSTM cells
         lstm_layer = tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"])
+        # lstm_layer = tf.contrib.rnn.MultiRNNCell([lstm_layer])
 
         # Outputs and states of lstm layer
         outputs, final_states = lstm_layer(inputs, initial_state, tf.float32, sequence_length)
 
-        # Dropout
+        # Dropout (could use dropout wrapper above instead to add dropout to input and/or hidden as well)
         if "dropout" in self.parameters.keys():
             outputs = tf.nn.dropout(outputs, self.parameters["dropout"])
 
