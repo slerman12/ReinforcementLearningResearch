@@ -6,7 +6,7 @@ import tensorflow as tf
 
 class Agent:
     def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
-                 actions=None, exploration_rate=None, k=None):
+                 actions=None, exploration_rate=None, k=None, brain=None, pytorch=False):
         # For measuring performance
         self.timer = 0
 
@@ -31,17 +31,45 @@ class Agent:
         self.exploration_rate = exploration_rate
         self.k = k
 
-        # Learning
-        self.brain = self.session = self.loss = self.train = self.accuracy = None
+        # If PyTorch
+        self.pytorch = pytorch
 
-    def start_brain(self):
+        # Learning
+        self.brain = brain
+        self.session = self.loss = self.train = self.accuracy = None
+
+    def start_brain(self, session=None):
+        # Start timing
+        start_time = time.time()
+
         # Default brain
-        if self.vision is not None:
-            self.brain = self.vision.brain
+        if self.brain is None:
+            if self.vision is not None:
+                self.brain = self.vision.brain
+
+        # Assign session
+        self.session = session
+
+        # Assign session to brain
+        self.brain.session = self.session
+
+        # Measure time
+        self.timer = time.time() - start_time
+
+        # Return session
+        return self.session
 
     def stop_brain(self):
-        # Close tensorflow session
-        tf.Session.close(self.session)
+        # Start timing
+        start_time = time.time()
+
+        # If not PyTorch
+        if not self.pytorch:
+            # Close TensorFlow session
+            tf.Session.close(self.session)
+
+        # Measure time
+        self.timer = time.time() - start_time
 
     def see(self, state):
         # Start timing
@@ -135,7 +163,7 @@ class Agent:
             self.long_term_memory.consolidate(self.short_term_memory)
 
         # Train brain
-        if self.train is not None:
+        if self.train is not None and not self.pytorch:
             _, loss = self.brain.run(placeholders, [self.train, self.loss])
 
         # Measure time
@@ -313,38 +341,48 @@ class NEC(MFEC):
 
 
 class Classifier(Agent):
-    def start_brain(self):
-        # Use vision
-        self.brain = self.vision.brain
+    def start_brain(self, session=None):
+        # Start timing
+        start_time = time.time()
+
+        # Default brain
+        if self.brain is None:
+            if self.vision is not None:
+                self.brain = self.vision.brain
 
         # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
-        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.brain.shape.as_list()) > 2:
-            # Cross entropy
-            cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(tf.nn.softmax(self.brain.brain))
-            cross_entropy = -tf.reduce_sum(cross_entropy, 2)
+        if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+            # # Cross entropy
+            # cross_entropy = self.brain.placeholders["desired_outputs"] * tf.log(tf.nn.softmax(self.brain.brain))
+            # cross_entropy = -tf.reduce_sum(cross_entropy, 2)
+            #
+            # # Mask for canceling out padding in dynamic sequences
+            # mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
+            #
+            # # Explicit masking of loss (necessary in case a bias was added to the padding!)
+            # cross_entropy *= mask
+            #
+            # # Average over the correct sequence lengths (this is where the mask is used)
+            # cross_entropy = tf.reduce_sum(cross_entropy, 1)
+            # cross_entropy /= tf.reduce_sum(mask, 1)
+            #
+            # # Average loss over each batch
+            # self.loss = tf.reduce_mean(cross_entropy)
 
-            # Mask for canceling out padding in dynamic sequences
-            mask = tf.sign(tf.reduce_max(tf.abs(self.brain.placeholders["desired_outputs"]), 2))
-
-            # Explicit masking of loss (necessary in case a bias was added to the padding!)
-            cross_entropy *= mask
-
-            # Average over the correct sequence lengths (this is where the mask is used)
-            cross_entropy = tf.reduce_sum(cross_entropy, 1)
-            cross_entropy /= tf.reduce_sum(mask, 1)
-
-            # Average loss over each batch
-            self.loss = tf.reduce_mean(cross_entropy)
+            # Alternative short form:
+            mask = tf.sequence_mask(self.brain.placeholders["time_dims"], maxlen=self.brain.brain.shape[1])
+            self.loss = tf.contrib.seq2seq.sequence_loss(self.brain.brain, self.brain.placeholders["desired_outputs"],
+                                                         weights=mask)
         else:
             # Softmax cross entropy
             self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(
                 logits=self.brain.brain, labels=self.brain.placeholders["desired_outputs"]))
 
         # Training optimization method
-        optimizer = tf.train.GradientDescentOptimizer(self.brain.parameters["learning_rate"])
+        optimizer = tf.train.GradientDescentOptimizer(self.brain.placeholders["learning_rate"])
 
         # If gradient clipping
-        if "max_gradient_clip_norm" in self.brain.parameters.keys():
+        if "max_gradient_clip_norm" in self.brain.parameters:
             # Trainable variables
             trainable_variables = tf.trainable_variables()
 
@@ -362,23 +400,34 @@ class Classifier(Agent):
         self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
             tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
 
-        # For initializing variables
-        initialize_variables = tf.global_variables_initializer()
+        # If no session provided
+        if session is None:
+            # For initializing variables
+            initialize_variables = tf.global_variables_initializer()
 
-        # Start session
-        self.session = tf.Session()
+            # Start session
+            self.session = tf.Session()
 
-        # Initialize variables
-        self.session.run(initialize_variables)
+            # Initialize variables
+            self.session.run(initialize_variables)
+        else:
+            # Assign session
+            self.session = session
 
         # Assign session to brain
         self.brain.session = self.session
+
+        # Measure time
+        self.timer = time.time() - start_time
+
+        # Return session
+        return self.session
 
 
 class TruncatedBPTTClassifier(Classifier):
     def learn(self, placeholders=None):
         # Allow total time parameter to be called either max_time_dim or time_dim
-        total_time = self.brain.parameters["time_dim"] if "time_dim" in self.brain.parameters.keys() \
+        total_time = self.brain.parameters["time_dim"] if "time_dim" in self.brain.parameters \
             else self.brain.parameters["max_time_dim"]
 
         # Assert truncated time divides total time (since I haven't made the sequence padding automatic yet) TODO
@@ -416,12 +465,12 @@ class TruncatedBPTTClassifier(Classifier):
                                    "initial_state": initial_state}
 
             # If input sequences have dynamic numbers of time dimensions
-            if "max_time_dim" in self.brain.parameters.keys():
-                # Update the dynamic lengths across each iteration's subsets
-                sequence_lengths_subset = np.maximum(np.minimum(placeholders["sequence_length"] -
-                                                                self.brain.parameters["truncated_time_dim"] *
-                                                                truncated_iterations,
-                                                                self.brain.parameters["truncated_time_dim"]), 0)
+            if "max_time_dim" in self.brain.parameters:
+                # Update the dynamic time dimensions across each iteration's subsets
+                time_dims_subset = np.maximum(np.minimum(placeholders["time_dims"] -
+                                                         self.brain.parameters["truncated_time_dim"] *
+                                                         truncated_iterations,
+                                                         self.brain.parameters["truncated_time_dim"]), 0)
 
                 # If one of the sequences is all empty, break
                 # TODO: Bucket batches to prevent breaking unfinished sequences and take batch subsets here otherwise
@@ -429,7 +478,7 @@ class TruncatedBPTTClassifier(Classifier):
                     break
 
                 # Placeholders for truncated iteration
-                subset_placeholders["sequence_length"] = sequence_lengths_subset
+                subset_placeholders["time_dims"] = time_dims_subset
 
             # Train
             _, subset_loss, initial_state = self.brain.run(subset_placeholders, [self.train, self.loss,
@@ -456,12 +505,17 @@ class TruncatedBPTTClassifier(Classifier):
 
 
 class Regressor(Agent):
-    def start_brain(self):
-        # Use vision
-        self.brain = self.vision.brain
+    def start_brain(self, session=None):
+        # Start timing
+        start_time = time.time()
+
+        # Default brain
+        if self.brain is None:
+            if self.vision is not None:
+                self.brain = self.vision.brain
 
         # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
-        if "max_time_dim" in self.brain.parameters.keys() and len(self.brain.brain.shape.as_list()) > 2:
+        if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
             # Mean squared difference
             mean_squared_difference = tf.reduce_mean(
                 tf.squared_difference(self.brain.brain, self.brain.placeholders["desired_outputs"]), axis=2)
@@ -479,10 +533,10 @@ class Regressor(Agent):
             self.loss = tf.losses.mean_squared_error(self.brain.placeholders["desired_outputs"], self.brain.brain)
 
         # Training optimization method
-        optimizer = tf.train.AdamOptimizer(self.brain.parameters["learning_rate"])
+        optimizer = tf.train.AdamOptimizer(self.brain.placeholders["learning_rate"])
 
         # If gradient clipping
-        if "max_gradient_clip_norm" in self.brain.parameters.keys():
+        if "max_gradient_clip_norm" in self.brain.parameters:
             # Trainable variables
             trainable_variables = tf.trainable_variables()
 
@@ -500,14 +554,25 @@ class Regressor(Agent):
         self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
             tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
 
-        # For initializing variables
-        initialize_variables = tf.global_variables_initializer()
+        # If no session provided
+        if session is None:
+            # For initializing variables
+            initialize_variables = tf.global_variables_initializer()
 
-        # Start session
-        self.session = tf.Session()
+            # Start session
+            self.session = tf.Session()
 
-        # Initialize variables
-        self.session.run(initialize_variables)
+            # Initialize variables
+            self.session.run(initialize_variables)
+        else:
+            # Assign session
+            self.session = session
 
         # Assign session to brain
         self.brain.session = self.session
+
+        # Measure time
+        self.timer = time.time() - start_time
+
+        # Return session
+        return self.session

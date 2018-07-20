@@ -15,7 +15,7 @@ brain_parameters = dict(learning_rate=0.01, input_dim=training.word_dim, hidden_
                         truncated_time_dim=5)
 
 # Vision
-vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
+vision = Vision.Vision(brain=Brains.LSTMFusedLayer(brain_parameters))
 
 # Agent
 agent = Agent.TruncatedBPTTClassifier(vision=vision)

@@ -1,6 +1,8 @@
 from __future__ import division
+import datetime
 import sys
 import pandas as pd
+import time
 from numpy import mean
 
 
@@ -9,15 +11,17 @@ class Performance:
     metrics = {}
     filename = None
 
-    def __init__(self, metric_names, run_throughs_per_epoch, filename=None, print_output=True):
+    def __init__(self, metric_names, run_throughs_per_epoch, filename=None, print_output=True, description=None):
         # Initialize variables
         self.metric_names = metric_names
         self.filename = filename
         self.run_throughs_per_epoch = run_throughs_per_epoch
+        self.epochs = 0
         self.print_output = print_output
+        self.time_training_began = time.time()
 
         # Empty metrics variable
-        for name in self.metric_names:
+        for name in self.metric_names + ["Total Elapsed Time"]:
             self.metrics[name] = []
 
         # Initialize progress variable
@@ -26,6 +30,9 @@ class Performance:
         # Create file
         if filename is not None:
             pd.DataFrame(data=self.metrics).to_csv(filename, index=False, columns=metric_names)
+
+        if description is not None:
+            print(description)
 
     def measure_performance(self, performance):
         # Initialize progress
@@ -41,6 +48,8 @@ class Performance:
                 self.progress.reset()
 
         # Add metrics
+        self.metrics["Total Elapsed Time"].append(str(datetime.timedelta(seconds=round(time.time() -
+                                                                                       self.time_training_began))))
         for key in performance:
             self.metrics[key].append(performance[key])
 
@@ -60,12 +69,14 @@ class Performance:
                 # Print description and epoch
                 if description is not None:
                     print(description)
-                print("Epochs: {}".format(run_through // self.run_throughs_per_epoch))
+                print("Epochs: {}, Total Elapsed Time: {}".format(run_through // self.run_throughs_per_epoch,
+                      datetime.timedelta(seconds=round(time.time() - self.time_training_began))))
 
                 # Print metrics
                 for key in self.metrics:
-                    print("* {}: {}".format(key, aggregation(self.metrics[key]) if key not in special_aggregation.keys()
-                    else special_aggregation[key](self.metrics[key])))
+                    if key != "Total Elapsed Time":
+                        print("* {}: {}".format(key, aggregation(self.metrics[key]) if key not in special_aggregation
+                        else special_aggregation[key](self.metrics[key])))
                 print("")
 
             # Output metrics to file
@@ -77,6 +88,12 @@ class Performance:
             # Empty metrics variable
             for name in self.metric_names:
                 self.metrics[name] = []
+
+            return True
+        return False
+
+    def is_epoch(self, run_through):
+        return run_through % self.run_throughs_per_epoch == 0 or run_through == 1
 
     def reset(self):
         # Empty metrics variable

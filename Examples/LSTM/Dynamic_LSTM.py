@@ -14,7 +14,7 @@ brain_parameters = dict(learning_rate=0.01, input_dim=training.word_dim, hidden_
                         max_time_dim=training.max_fable_length, batch_dim=64, max_gradient_clip_norm=5)
 
 # Vision
-vision = Vision.Vision(brain=Brains.LSTM(brain_parameters))
+vision = Vision.Vision(brain=Brains.LSTMFusedLayer(brain_parameters))
 
 # Agent
 agent = Agent.Classifier(vision=vision)

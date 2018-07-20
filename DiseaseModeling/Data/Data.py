@@ -6,7 +6,7 @@ import random
 
 # Data handler
 class ReadPD:
-    def __init__(self, filename, targets, to_drop=None):
+    def __init__(self, filename, targets, to_drop=None, train_test_split=1, valid_eval_split=0):
         # Processed data file
         file = pd.read_csv(filename)
 
@@ -16,6 +16,9 @@ class ReadPD:
         # Data
         self.PD_Data = []
 
+        # Train test split
+        self.train_test_split = train_test_split
+
         # Max number of records for any patient
         self.max_num_records = file.groupby(["PATNO"]).size().max() - 1
 
@@ -23,7 +26,7 @@ class ReadPD:
         self.patient_record_dim = len(file.drop(to_drop, axis=1).columns.values)
 
         # Dimension of input
-        self.input_dim = self.patient_record_dim - len(targets)
+        self.input_dim = self.patient_record_dim
 
         # Dimension of desired output
         self.desired_output_dim = len(targets)
@@ -31,21 +34,21 @@ class ReadPD:
         # Variable for iterating batches
         self.batch_begin = 0
 
-        # List of inputs, desired outputs, and sequence lengths
+        # List of inputs, desired outputs, and time dimensions
         for patient in file["PATNO"].unique():
             # All patient records (sorted by date-time)
             patient_records = file[file["PATNO"] == patient].sort_values(["INFODT"]).drop(to_drop, axis=1)
 
-            # Sequence lengths
-            length = patient_records.shape[0] - 1
+            # Time dimensions
+            time_dim = patient_records.shape[0] - 1
 
             # Inputs + padding
             inputs = np.zeros((self.max_num_records, self.input_dim), dtype=np.float64)
-            inputs[:length] = patient_records.drop(targets, axis=1).values[:-1]
+            inputs[:time_dim] = patient_records.values[:-1]
 
             # Desired outputs + padding (desired outputs are: next / previous)
             desired_outputs = np.zeros((self.max_num_records, self.desired_output_dim), dtype=np.float64)
-            desired_outputs[:length] = patient_records[targets].values[1:]
+            desired_outputs[:time_dim] = patient_records[targets].values[1:]
 
             # # Desired outputs + padding (desired outputs are: next / previous)
             # desired_outputs[:length] = np.divide(patient_records[targets].values[1:],
@@ -63,33 +66,58 @@ class ReadPD:
             #         print(patient_records[targets].values[:-1][ind])
 
             # Add patient records to PD data
-            self.PD_Data.append({"id": patient, "inputs": inputs, "desired_outputs": desired_outputs, "length": length})
+            self.PD_Data.append({"id": patient, "inputs": inputs, "desired_outputs": desired_outputs,
+                                 "time_dim": time_dim})
 
         # Shuffle data
         random.shuffle(self.PD_Data)
 
+        # Training data
+        self.training_data = self.PD_Data[:round(self.train_test_split * len(self.PD_Data))]
+
+        # Testing data
+        self.testing_data = self.PD_Data[round(self.train_test_split * len(self.PD_Data)):]
+
+        # Validation data
+        self.validation_data = self.testing_data[:round(self.train_test_split * len(self.testing_data))]
+
+        # Evaluation data
+        self.evaluation_data = self.testing_data[round(self.train_test_split * len(self.testing_data)):]
+
     def iterate_batch(self, batch_size):
         # Reset and shuffle batch when all items have been iterated
-        if self.batch_begin > len(self.PD_Data) - batch_size:
+        if self.batch_begin > len(self.training_data) - batch_size:
             # Reset batch index
             self.batch_begin = 0
 
             # Shuffle PD data
-            random.shuffle(self.PD_Data)
+            random.shuffle(self.training_data)
 
         # Index of the end boundary of this batch
-        batch_end = min(self.batch_begin + batch_size, len(self.PD_Data))
+        batch_end = min(self.batch_begin + batch_size, len(self.training_data))
 
         # Batch
-        batch = self.PD_Data[self.batch_begin:batch_end]
+        batch = self.training_data[self.batch_begin:batch_end]
 
         # Update batch index
         self.batch_begin = batch_end
 
-        # Return inputs, desired outputs, and lengths
+        # Return inputs, desired outputs, and time_dims
         return np.stack([patient_records["inputs"] for patient_records in batch]), \
-            np.stack([patient_records["desired_outputs"] for patient_records in batch]), \
-            np.array([patient_records["length"] for patient_records in batch])
+               np.stack([patient_records["desired_outputs"] for patient_records in batch]), \
+               np.array([patient_records["time_dim"] for patient_records in batch])
+
+    def read(self, data, batch_size=None):
+        # Shuffle testing data
+        random.shuffle(data)
+
+        # Testing batch
+        data = data if batch_size is None else data[:batch_size]
+
+        # Return test data of batch size
+        return dict(inputs=np.stack([patient_records["inputs"] for patient_records in data]),
+                    desired_outputs=np.stack([patient_records["desired_outputs"] for patient_records in data]),
+                    time_dims=np.array([patient_records["time_dim"] for patient_records in data]))
 
 
 # Count missing variables per variable and visit and output summary to csv
@@ -227,7 +255,6 @@ def encode(data):
 
 # Process data
 def process(data, to_drop):
-
     # Drop
     dropped = drop(data, to_drop)
 
@@ -255,7 +282,7 @@ if __name__ == "__main__":
     # Variables to drop
     variables_to_drop = ["EVENT_ID", "GENDER", "GENDER.y", "SXDT", "PDDXDT", "SXDT_x",
                          "PDDXDT_x", "BIRTHDT.x", "INFODT_2", "ENROLL_DATE",
-                         "INITMDDT", "INITMDVS"]
+                         "INITMDDT", "INITMDVS", "ANNUAL_TIME_BTW_DOSE_NUPDRS_y"]
 
     # Data processing
     process(preprocessed, variables_to_drop)
