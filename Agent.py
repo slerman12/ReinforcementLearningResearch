@@ -36,7 +36,7 @@ class Agent:
 
         # Learning
         self.brain = brain
-        self.session = self.loss = self.train = self.accuracy = None
+        self.session = self.loss = self.train = self.accuracy = self.gradients = self.variables = self.saver = None
 
     def start_brain(self, session=None):
         # Start timing
@@ -149,7 +149,7 @@ class Agent:
         # Measure time
         self.timer = time.time() - start_time
 
-    def learn(self, placeholders=None):
+    def learn(self, placeholders=None, tensorboard_logs=None):
         # Start timing
         start_time = time.time()
 
@@ -157,6 +157,7 @@ class Agent:
         if placeholders is None:
             placeholders = {}
         loss = None
+        logs = None
 
         # Consolidate memories
         if self.long_term_memory is not None:
@@ -164,13 +165,16 @@ class Agent:
 
         # Train brain
         if self.train is not None and not self.pytorch:
-            _, loss = self.brain.run(placeholders, [self.train, self.loss])
+            if tensorboard_logs is None:
+                _, loss = self.brain.run(placeholders, [self.train, self.loss])
+            else:
+                _, loss, logs = self.brain.run(placeholders, [self.train, self.loss, tensorboard_logs])
 
         # Measure time
         self.timer = time.time() - start_time
 
         # Return loss
-        return loss
+        return loss, logs
 
     def move_time_forward(self):
         # Size of discrete time unit
@@ -178,6 +182,15 @@ class Agent:
 
         # Move perception of time forward
         self.perception_of_time += time_quantum
+
+    def save(self, filename="Saved/brain"):
+        # Save to file
+        self.saver.save(self.session, filename)
+
+    def load(self, filename="Saved/brain"):
+        # max(glob.glob('Saved/*'), key=os.path.getctime)
+        if tf.train.checkpoint_exists(filename):
+            self.saver.restore(self.session, filename)
 
 
 class MFEC(Agent):
@@ -246,7 +259,7 @@ class MFEC(Agent):
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
 
-    def learn(self, placeholders=None):
+    def learn(self, placeholders=None, tensorboard_logs=None):
         # Start timing
         start_time = time.time()
 
@@ -261,8 +274,11 @@ class MFEC(Agent):
                 self.long_term_memory[action].consolidate(short_term_memories=self.short_term_memory[action])
 
         # Train brain
-        if self.train is not None:
-            _, loss = self.brain.run(placeholders, [self.train, self.loss])
+        if self.train is not None and not self.pytorch:
+            if tensorboard_logs is None:
+                _, loss = self.brain.run(placeholders, [self.train, self.loss])
+            else:
+                _, loss, logs = self.brain.run(placeholders, [self.train, self.loss, tensorboard_logs])
 
         # Measure time
         self.timer = time.time() - start_time
@@ -408,14 +424,18 @@ class Classifier(Agent):
             # Start session
             self.session = tf.Session()
 
-            # Initialize variables
-            self.session.run(initialize_variables)
+            # Initialize variables (only for training)
+            if self.brain.scope_name == "training":
+                self.session.run(initialize_variables)
         else:
             # Assign session
             self.session = session
 
         # Assign session to brain
         self.brain.session = self.session
+
+        # Saver
+        self.saver = tf.train.Saver()
 
         # Measure time
         self.timer = time.time() - start_time
@@ -425,7 +445,7 @@ class Classifier(Agent):
 
 
 class TruncatedBPTTClassifier(Classifier):
-    def learn(self, placeholders=None):
+    def learn(self, placeholders=None, tensorboard_logs=None):
         # Allow total time parameter to be called either max_time_dim or time_dim
         total_time = self.brain.parameters["time_dim"] if "time_dim" in self.brain.parameters \
             else self.brain.parameters["max_time_dim"]
@@ -532,23 +552,25 @@ class Regressor(Agent):
             # Mean squared error
             self.loss = tf.losses.mean_squared_error(self.brain.placeholders["desired_outputs"], self.brain.brain)
 
-        # Training optimization method
-        optimizer = tf.train.AdamOptimizer(self.brain.placeholders["learning_rate"])
+        # Training
+        if self.brain.scope_name == "training":
+            # Training optimization method
+            optimizer = tf.train.AdamOptimizer(self.brain.placeholders["learning_rate"])
 
-        # If gradient clipping
-        if "max_gradient_clip_norm" in self.brain.parameters:
-            # Trainable variables
-            trainable_variables = tf.trainable_variables()
+            # If gradient clipping
+            if "max_gradient_clip_norm" in self.brain.parameters:
+                # Trainable variables
+                self.trainable_variables = tf.trainable_variables()
 
-            # Get gradients of loss and clip them according to max gradient clip norm
-            gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, trainable_variables),
-                                                  self.brain.parameters["max_gradient_clip_norm"])
+                # Get gradients of loss and clip them according to max gradient clip norm
+                self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.trainable_variables),
+                                                           self.brain.parameters["max_gradient_clip_norm"])
 
-            # Training
-            self.train = optimizer.apply_gradients(zip(gradients, trainable_variables))
-        else:
-            # Training
-            self.train = optimizer.minimize(self.loss)
+                # Training
+                self.train = optimizer.apply_gradients(zip(self.gradients, self.trainable_variables))
+            else:
+                # Training
+                self.train = optimizer.minimize(self.loss)
 
         # Test accuracy
         self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
@@ -562,14 +584,18 @@ class Regressor(Agent):
             # Start session
             self.session = tf.Session()
 
-            # Initialize variables
-            self.session.run(initialize_variables)
+            # Initialize variables (only for training)
+            if self.brain.scope_name == "training":
+                self.session.run(initialize_variables)
         else:
             # Assign session
             self.session = session
 
         # Assign session to brain
         self.brain.session = self.session
+
+        # Saver
+        self.saver = tf.train.Saver()
 
         # Measure time
         self.timer = time.time() - start_time

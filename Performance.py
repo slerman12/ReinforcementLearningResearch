@@ -4,6 +4,7 @@ import sys
 import pandas as pd
 import time
 from numpy import mean
+import tensorflow as tf
 
 
 class Performance:
@@ -11,7 +12,7 @@ class Performance:
     metrics = {}
     filename = None
 
-    def __init__(self, metric_names, run_throughs_per_epoch, filename=None, print_output=True, description=None):
+    def __init__(self, metric_names, run_throughs_per_epoch=None, filename=None, print_output=True, description=None):
         # Initialize variables
         self.metric_names = metric_names
         self.filename = filename
@@ -19,6 +20,8 @@ class Performance:
         self.epochs = 0
         self.print_output = print_output
         self.time_training_began = time.time()
+        self.tensorboard = None
+        self.get_tensorboard_logs = None
 
         # Empty metrics variable
         for name in self.metric_names + ["Total Elapsed Time"]:
@@ -57,10 +60,20 @@ class Performance:
         if self.progress is not None:
             self.progress.update_progress()
 
-    def output_performance(self, run_through, description=None, aggregation=mean, special_aggregation=None):
+    def output_performance(self, run_through, description=None, aggregation=mean, special_aggregation=None,
+                           logs_for_tensorboard=None):
         # Default no special aggregation
         if special_aggregation is None:
             special_aggregation = {}
+
+        # Logs for tensorboard
+        if logs_for_tensorboard is not None:
+            if self.tensorboard is None:
+                self.tensorboard = tf.summary.FileWriter("Logs", graph=tf.get_default_graph())
+            if logs_for_tensorboard is True:
+                self.tensorboard.flush()
+            else:
+                self.tensorboard.add_summary(logs_for_tensorboard, run_through)
 
         # End epoch
         if run_through % self.run_throughs_per_epoch == 0 or run_through == 1:
@@ -94,6 +107,30 @@ class Performance:
 
     def is_epoch(self, run_through):
         return run_through % self.run_throughs_per_epoch == 0 or run_through == 1
+
+    def logs_for_tensorboard(self, scalars=None, gradients=None, variables=None):
+        # Default lists
+        if scalars is None:
+            scalars = {}
+
+        # Add scalars to logs
+        for name in scalars:
+            tf.summary.scalar(name, scalars[name])
+
+        # Create summaries to visualize weights
+        if variables is not None:
+            for variable in variables:
+                tf.summary.histogram(variable.name, variable)
+
+        # Summarize all gradients
+        if gradients is not None:
+            if variables is None:
+                variables = tf.trainable_variables()
+            for gradient, variable in list(zip(gradients, variables)):
+                tf.summary.histogram(variable.name + '/gradient', gradient)
+
+        # Merge all logs into a single operation to be run by the agent
+        self.get_tensorboard_logs = tf.summary.merge_all()
 
     def reset(self):
         # Empty metrics variable

@@ -70,7 +70,7 @@ class ReadPD:
                                  "time_dim": time_dim})
 
         # Shuffle data
-        random.shuffle(self.PD_Data)
+        # random.shuffle(self.PD_Data)
 
         # Training data
         self.training_data = self.PD_Data[:round(self.train_test_split * len(self.PD_Data))]
