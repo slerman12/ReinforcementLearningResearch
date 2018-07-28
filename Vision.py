@@ -10,7 +10,7 @@ import tensorflow as tf
 
 
 class Vision:
-    def __init__(self, size=None, greyscale=False, crop=None, params=None, brain=None):
+    def __init__(self, size=None, greyscale=False, crop=None, params=None, brain=None, tensorflow=True):
         # State
         self.state = None
 
@@ -25,13 +25,18 @@ class Vision:
         # Architecture ("brain module")
         self.brain = brain
 
+        # If using TensorFlow
+        self.tensorflow = tensorflow
+
         # Learning
-        self.session = self.loss = self.train = self.accuracy = None
+        self.session = self.name_scope = self.loss = self.train = self.accuracy = None
 
-    def start_brain(self):
-        pass
+    def start_brain(self, name_scope="vision"):
+        if self.tensorflow:
+            with tf.name_scope(name_scope):
+                self.brain.build()
 
-    def see(self, state):
+    def see(self, state, batch_dims=1, time_dims=1, partial_run_setup=None):
         # Set state
         self.state = state
 
@@ -45,12 +50,12 @@ class Vision:
             width = self.state.shape[1]
             self.state = self.state[self.crop[0]:(height - self.crop[1]), self.crop[3]:(width - self.crop[2])]
 
-        # Image resize
+        # Image resize TODO make all these image processings work with state dicts of batches and sequences
         if self.size is not None:
             self.state = cv2.resize(self.state, dsize=self.size)
 
-        # Return meaningful representation
-        return self.brain.run({"inputs": self.state})
+        # Get meaningful representation
+        return self.brain.run(state, partial_run_setup=partial_run_setup)
 
     def experience(self, experience):
         pass

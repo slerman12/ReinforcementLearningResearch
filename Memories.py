@@ -165,7 +165,7 @@ class Memories:
         # Return memories
         return dist[0], ind[0]
 
-    def consolidate(self, short_term_memories=None, leaf_size=400, brain=None):
+    def consolidate(self, short_term_memories=None, leaf_size=400):
         # If there are short term memories available
         if short_term_memories is not None:
             # Store short term memories
@@ -174,11 +174,6 @@ class Memories:
 
             # Empty out short term memories
             short_term_memories.reset()
-
-        # Consolidate memory representations
-        if brain is not None:
-            self.memories["scene"] = brain.run({"inputs": self.memories["state"]}, brain.brain)
-            self.modified = True
 
         # If memories in memory and modified, consolidate tree
         if self.length > 0 and self.modified:
