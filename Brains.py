@@ -457,7 +457,7 @@ class PD_LSTM_Memory_Model(Brains):
             # Outputs and states of lstm layers
             outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, initial_state)
 
-        # Final dense layer weights
+        # Final dense layer weights TODO get rid of maybe and change hidden dim to output dim
         output_weights = tf.get_variable("output_weights", [self.parameters["hidden_dim"],
                                                             self.parameters["output_dim"]])
 

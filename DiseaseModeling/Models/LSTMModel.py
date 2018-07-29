@@ -61,7 +61,7 @@ if __name__ == "__main__":
                             "learning_rate": learning_rate, "time_ahead": time_ahead})
 
         # Validate
-        validation_mse = validate.measure_loss(validation_data, episode) if performance.is_epoch(episode) else None
+        validation_mse = validate.measure_loss(validation_data) if performance.is_epoch(episode) else None
 
         # Measure performance
         performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Learning Rate": learning_rate,

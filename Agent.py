@@ -9,6 +9,9 @@ import Brains
 class Agent:
     def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
                  actions=None, exploration_rate=None, k=None, tensorflow=True, scope_name="training", session=None):
+        # Start timing
+        start_time = time.time()
+
         # For measuring performance
         self.timer = 0
 
@@ -44,7 +47,7 @@ class Agent:
         self.scope_name = scope_name
         self.session = session
 
-        # If using TensorFlow, open scope and start brains (build graphs)
+        # If using TensorFlow, open scope, start brains (build graphs), and begin session
         if self.tensorflow:
             with tf.name_scope(self.scope_name):
                 with tf.variable_scope("brain", reuse=None or self.scope_name != "training",
@@ -54,33 +57,36 @@ class Agent:
                         self.vision.start_brain()
 
                     # Start brain
-                    self.start_brain(self.session)
+                    self.start_brain()
 
                     self.learning_steps = tf.Variable(0, name='learning_steps', trainable=False, dtype=tf.int32)
                     self.increment_learning_steps = tf.assign_add(self.learning_steps, 1)
 
-    def start_brain(self, session=None):
-        # Start timing
-        start_time = time.time()
+            # If no session provided
+            if self.session is None:
+                # For initializing variables
+                initialize_variables = tf.global_variables_initializer()
 
-        # Default brain
-        if self.brain is None:
-            if self.vision is not None:
-                self.brain = self.vision.brain
+                # Start session
+                self.session = tf.Session()
 
-        # Assign session
-        self.session = session
+                # Initialize variables (only for training)
+                if self.scope_name == "training":
+                    self.session.run(initialize_variables)
 
-        # Assign session to brains
-        if self.vision is not None:
+            # Assign session to brains
             self.vision.brain.session = self.session
-        self.brain.session = self.session
+            self.brain.session = self.session
+
+            # Saver
+            if self.scope_name == "training":
+                self.tensorflow_saver = tf.train.Saver()
 
         # Measure time
         self.timer = time.time() - start_time
 
-        # Return session
-        return self.session
+    def start_brain(self):
+        pass
 
     def stop_brain(self):
         # Start timing
@@ -122,16 +128,20 @@ class Agent:
         # Return scene
         return scene
 
-    def remember(self, concept, batch_dims=1, time_dims=1):
+    def remember(self, concept, batch_dims=1, max_time_dim=1, time_dims=None):
         # Start timing
         start_time = time.time()
 
         # Initialize memories
-        remember_concepts = np.zeros([batch_dims, time_dims, self.k, self.attributes["concepts"]])
-        remember_attributes = np.zeros([batch_dims, time_dims, self.k, self.attributes["attributes"]])
+        remember_concepts = np.zeros([batch_dims, max_time_dim, self.k, self.attributes["concepts"]])
+        remember_attributes = np.zeros([batch_dims, max_time_dim, self.k, self.attributes["attributes"]])
 
         # Initialize duplicate (negative means no duplicate)
         duplicate = []
+
+        # Initialize default time dims
+        if time_dims is None:
+            time_dims = np.full(batch_dims, max_time_dim)
 
         # Memory Module
         if self.long_term_memory is not None:
@@ -139,22 +149,26 @@ class Agent:
             for batch_dim in range(batch_dims):
                 # For each time
                 for time_dim in range(time_dims):
-                    # Number of similar memories
-                    num_similar_memories = min(self.long_term_memory.length, self.k)
+                    # If padding
+                    if time_dim > time_dims[batch_dim]:
+                        break
+                    else:
+                        # Number of similar memories
+                        num_similar_memories = min(self.long_term_memory.length, self.k)
 
-                    # If there are memories to draw from
-                    if num_similar_memories > 0:
-                        # Query to memory
-                        query = concept[batch_dim, time_dim]
+                        # If there are memories to draw from
+                        if num_similar_memories > 0:
+                            # Query to memory
+                            query = concept[batch_dim, time_dim]
 
-                        # If not all zero
-                        if query.any():
-                            # Similar memories TODO check if duplicate with distance == 0
-                            distances, indices = self.long_term_memory.retrieve(query, self.k)
-                            remember_concepts[batch_dim, time_dim] = \
-                                self.long_term_memory.memories["concepts"][indices]
-                            remember_attributes[batch_dim, time_dim] = \
-                                self.long_term_memory.memories["attributes"][indices]
+                            # If not all zero
+                            if query.any():
+                                # Similar memories TODO check if duplicate with distance == 0
+                                distances, indices = self.long_term_memory.retrieve(query, self.k)
+                                remember_concepts[batch_dim, time_dim] = \
+                                    self.long_term_memory.memories["concepts"][indices]
+                                remember_attributes[batch_dim, time_dim] = \
+                                    self.long_term_memory.memories["attributes"][indices]
 
         # Measure time
         self.timer = time.time() - start_time
@@ -560,27 +574,6 @@ class Classifier(Agent):
         self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
             tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
 
-        # If no session provided
-        if session is None:
-            # For initializing variables
-            initialize_variables = tf.global_variables_initializer()
-
-            # Start session
-            self.session = tf.Session()
-
-            # Initialize variables (only for training)
-            if self.brain.scope_name == "training":
-                self.session.run(initialize_variables)
-        else:
-            # Assign session
-            self.session = session
-
-        # Assign session to brain
-        self.brain.session = self.session
-
-        # Saver
-        self.tensorflow_saver = tf.train.Saver()
-
         # Measure time
         self.timer = time.time() - start_time
 
@@ -716,32 +709,6 @@ class Regressor(Agent):
                 # Training
                 self.train = optimizer.minimize(self.loss)
 
-        # Test accuracy
-        self.accuracy = tf.reduce_mean(tf.cast(tf.equal(
-            tf.argmax(self.brain.brain, 1), tf.argmax(self.brain.placeholders["desired_outputs"], 1)), tf.float32))
-
-        # If no session provided
-        if session is None:
-            # For initializing variables
-            initialize_variables = tf.global_variables_initializer()
-
-            # Start session
-            self.session = tf.Session()
-
-            # Initialize variables (only for training)
-            if self.scope_name == "training":
-                self.session.run(initialize_variables)
-        else:
-            # Assign session
-            self.session = session
-
-        # Assign session to brain
-        self.brain.session = self.session
-
-        # Saver
-        if self.scope_name == "training":
-            self.tensorflow_saver = tf.train.Saver()
-
         # Measure time
         self.timer = time.time() - start_time
 
@@ -750,13 +717,7 @@ class Regressor(Agent):
 
 
 class LifelongMemory(Agent):
-    def start_brain(self, session=None, tensorboard_writer=None):
-        # Start timing
-        start_time = time.time()
-
-        # Representation module
-        assert self.vision is not None
-
+    def start_brain(self):
         # Desired outputs
         desired_outputs = tf.placeholder("float", [None, None, self.attributes["concepts"]])
 
@@ -800,7 +761,7 @@ class LifelongMemory(Agent):
         # Set brain for agent
         self.brain = Brains.Brains(brain=outputs, parameters=self.vision.brain.parameters, placeholders=placeholders)
 
-        # If not just representing memories
+        # If not just representing memories, compute the loss
         if self.scope_name != "memory_representation":
             # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
             if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
@@ -820,51 +781,22 @@ class LifelongMemory(Agent):
                 # Mean squared error
                 self.loss = tf.losses.mean_squared_error(desired_outputs, self.brain.brain)
 
-        # Training
-        if self.scope_name == "training":
-            # Training optimization method
-            optimizer = tf.train.AdamOptimizer(self.brain.placeholders["learning_rate"])
-
-            # If gradient clipping
-            if "max_gradient_clip_norm" in self.brain.parameters:
-                # Trainable variables
-                self.variables = tf.trainable_variables()
-
-                # Get gradients of loss and clip them according to max gradient clip norm
-                self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
-                                                           self.brain.parameters["max_gradient_clip_norm"])
-
-                # Training
-                self.train = optimizer.apply_gradients(zip(self.gradients, self.variables))
-            else:
-                # Training
-                self.train = optimizer.minimize(self.loss)
-
-        # If no session provided
-        if session is None:
-            # For initializing variables
-            initialize_variables = tf.global_variables_initializer()
-
-            # Start session
-            self.session = tf.Session()
-
-            # Initialize variables (only for training)
+            # If training
             if self.scope_name == "training":
-                self.session.run(initialize_variables)
-        else:
-            # Assign session
-            self.session = session
+                # Training optimization method
+                optimizer = tf.train.AdamOptimizer(self.brain.placeholders["learning_rate"])
 
-        # Assign session to brains
-        self.vision.brain.session = self.session
-        self.brain.session = self.session
+                # If gradient clipping
+                if "max_gradient_clip_norm" in self.brain.parameters:
+                    # Trainable variables
+                    self.variables = tf.trainable_variables()
 
-        # Saver
-        if self.scope_name == "training":
-            self.tensorflow_saver = tf.train.Saver()
+                    # Get gradients of loss and clip them according to max gradient clip norm
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                               self.brain.parameters["max_gradient_clip_norm"])
 
-        # Measure time
-        self.timer = time.time() - start_time
-
-        # Return session
-        return self.session
+                    # Training
+                    self.train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                else:
+                    # Training
+                    self.train = optimizer.minimize(self.loss)

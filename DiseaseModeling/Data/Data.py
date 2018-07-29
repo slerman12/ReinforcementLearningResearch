@@ -109,10 +109,11 @@ class ReadPD:
             # Extract individual time dims from data
             for patient_record in data:
                 for i, inputs in enumerate(patient_record["inputs"]):
-                    time_dims_separated_data.append({"inputs": inputs,
-                                                     "desired_outputs": patient_record["desired_outputs"][i],
-                                                     "time_dims": patient_record["time_dims"],
-                                                     "time_ahead": patient_record["time_ahead"][i]})
+                    if inputs.any():
+                        time_dims_separated_data.append({"inputs": inputs,
+                                                         "desired_outputs": patient_record["desired_outputs"][i],
+                                                         "time_dims": patient_record["time_dims"],
+                                                         "time_ahead": patient_record["time_ahead"][i]})
 
             # Replace data
             data = time_dims_separated_data

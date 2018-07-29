@@ -19,16 +19,16 @@ brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128
                         max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="fused",
                         max_gradient_clip_norm=5, time_ahead=True)
 
-# Validation data
-validation_data = reader.read(reader.validation_data, time_ahead=brain_parameters["time_ahead"])
-
-# Validation parameters
-validation_parameters = brain_parameters.copy()
-validation_parameters["dropout"] = [0, 0, 0]
-validation_parameters["batch_dim"] = len(reader.validation_data)
-
 # Attributes
 attributes = {"concepts": brain_parameters["output_dim"], "attributes": reader.desired_output_dim}
+
+# Memory data
+memory_data = reader.read(reader.evaluation_data, time_dims_separated=True)
+
+# Memory representation parameters
+memory_representation_parameters = brain_parameters.copy()
+memory_representation_parameters["dropout"] = [0, 0, 0]
+memory_representation_parameters["batch_dim"] = len(memory_data["inputs"])
 
 # Memory
 memory = Memories.Memories(capacity=len(reader.evaluation_data), attributes=attributes)
@@ -37,45 +37,32 @@ memory = Memories.Memories(capacity=len(reader.evaluation_data), attributes=attr
 agent = Agent.Regressor(vision=Vision.Vision(brain=Brains.PD_LSTM_Model(brain_parameters)), long_term_memory=memory,
                         attributes=attributes)
 
-# Validation
-validate = Agent.Regressor(vision=Vision.Vision(brain=Brains.PD_LSTM_Model(validation_parameters)),
-                           session=agent.session, scope_name="validating")
-
-# Memory representation parameters
-memory_representation_parameters = brain_parameters.copy()
-memory_representation_parameters["dropout"] = [0, 0, 0]
-memory_representation_parameters["batch_dim"] = memory.capacity
-
-# Memory data
-memory_data = reader.read(reader.evaluation_data)
-
 # Memory representation
-memory_representation = Agent.Regressor(session=agent.session, scope_name="memory_representation", vision=Vision.Vision(
-    brain=Brains.PD_LSTM_Model(memory_representation_parameters)))
-
-# Initial memories TODO untile the time dims
-memories = memory_representation.see(memory_data)
-
-# Populate memory with memories
-memory.reset(population=memories)
-
-# Consolidate memory
-memory.consolidate()
+memory_represent = Agent.Regressor(vision=Vision.Vision(brain=Brains.PD_LSTM_Model(memory_representation_parameters)),
+                                   session=agent.session, scope_name="memory_representation")
 
 # Initialize metrics for measuring performance
-performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate", "RMSE",
-                                                    "Loss (MSE)", "Validation (MSE)"], description=brain_parameters,
+performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
+                                                    "RMSE", "Loss (MSE)"], description=brain_parameters,
                                       run_throughs_per_epoch=len(reader.training_data) // brain_parameters["batch_dim"])
 
 # TensorBoard
 agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables)
-validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer)
 
 # Main method
 if __name__ == "__main__":
     # Load agent
     if restore:
         agent.load()
+
+    # Memory representations (capacity x time x representation)
+    memories = memory_represent.see(memory_data)
+
+    # Populate memory with representations
+    memory.reset(population=memories)
+
+    # Consolidate memories (build KD tree for them)
+    memory.consolidate()
 
     # Training iterations
     for episode in range(1, 100000000000 + 1):
@@ -90,7 +77,7 @@ if __name__ == "__main__":
 
         # Remember
         remember_concepts, remember_attributes = agent.remember(scene, brain_parameters["batch_dims"],
-                                                                brain_parameters["time_dims"])
+                                                                brain_parameters["max_time_dim"], time_dims)
 
         # Train
         loss = agent.learn({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
@@ -102,19 +89,18 @@ if __name__ == "__main__":
                                          "RMSE": np.sqrt(loss), "Loss (MSE)": loss})
 
         # Display performance
-        performance.output_performance(run_through=episode, special_aggregation={"Episode": lambda x: x[-1],
-                                                                                 "Validation (MSE)": lambda x: x[-1]})
+        performance.output_performance(run_through=episode, special_aggregation={"Episode": lambda x: x[-1]})
 
         # End of epoch
         if performance.is_epoch(episode):
             # Save agent
             agent.save()
 
-            # Update memories
-            memories = memory_representation.see(memory_data)
+            # Memory representations
+            memories = memory_represent.see(memory_data)
 
-            # Populate memory with memories
+            # Replace memories with new representations
             memory.reset(population=memories)
 
-            # Consolidate memory
+            # Consolidate memories (build KD tree for them)
             memory.consolidate()
