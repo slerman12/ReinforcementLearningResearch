@@ -55,7 +55,7 @@ class Vision:
             self.state = cv2.resize(self.state, dsize=self.size)
 
         # Get meaningful representation
-        return self.brain.run(state, partial_run_setup=partial_run_setup)
+        return self.brain.run(self.state, partial_run_setup=partial_run_setup)
 
     def experience(self, experience):
         pass

@@ -112,7 +112,6 @@ class Agent:
             # Setup a partial run such that the graph is not recomputed later
             partial_run_fetches = [fetch for fetch in [self.train, self.loss] if fetch is not None]
             partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) > 0 else None
-
             # See
             if partial_run_setup is None:
                 scene = self.vision.see(state)
@@ -783,8 +782,12 @@ class LifelongMemory(Agent):
 
             # If training
             if self.scope_name == "training":
+                # Learning rate
+                learning_rate = tf.placeholder(tf.float32, shape=[])
+                self.brain.placeholders["learning_rate"] = learning_rate
+
                 # Training optimization method
-                optimizer = tf.train.AdamOptimizer(self.brain.placeholders["learning_rate"])
+                optimizer = tf.train.AdamOptimizer(learning_rate)
 
                 # If gradient clipping
                 if "max_gradient_clip_norm" in self.brain.parameters:

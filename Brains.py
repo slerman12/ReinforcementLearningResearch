@@ -371,10 +371,8 @@ class PD_LSTM_Memory_Model(Brains):
     def build(self):
         # Graph placeholders
         inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        desired_outputs = tf.placeholder("float", [None, None, self.parameters["output_dim"]])
         time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
-        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "time_dims": time_dims,
-                             "learning_rate": tf.placeholder(tf.float32, shape=[])}
+        self.placeholders = {"inputs": inputs, "time_dims": time_dims}
 
         # Default cell mode ("basic", "block", "cudnn") and number of layers
         mode = self.parameters["mode"] if "mode" in self.parameters else "block"
@@ -390,14 +388,14 @@ class PD_LSTM_Memory_Model(Brains):
             inputs = tf.transpose(inputs, [1, 0, 2])
 
             # Layers of lstm cells
-            lstm_layers = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers=num_layers, num_units=self.parameters["hidden_dim"],
+            lstm_layers = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers=num_layers, num_units=self.parameters["output_dim"],
                                                          dropout=self.parameters["dropout"][1])
 
             # Initial state
             initial_state = (tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["hidden_dim"]], tf.float32),
+                                       self.parameters["output_dim"]], tf.float32),
                              tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["hidden_dim"]], tf.float32))
+                                       self.parameters["output_dim"]], tf.float32))
             self.placeholders["initial_state"] = initial_state
 
             # Outputs and states of lstm layers
@@ -415,15 +413,15 @@ class PD_LSTM_Memory_Model(Brains):
 
             # Initialize layers, states, and outputs
             layers = []
-            initial_states = [(tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32),
-                               tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32))
+            initial_states = [(tf.zeros([self.parameters["batch_dim"], self.parameters["output_dim"]], tf.float32),
+                               tf.zeros([self.parameters["batch_dim"], self.parameters["output_dim"]], tf.float32))
                               for _ in range(num_layers)]
             outputs = inputs
             final_states = []
 
             # Feed one layer into the next
             for layer in range(num_layers):
-                layers.append(tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"]))
+                layers.append(tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["output_dim"]))
                 outputs, final_state = layers[-1](outputs, initial_states[layer], tf.float32, time_dims)
                 final_states.append(final_state)
 
@@ -439,15 +437,15 @@ class PD_LSTM_Memory_Model(Brains):
             if "dropout" in self.parameters:
                 lstm_layers = tf.contrib.rnn.MultiRNNCell(
                     [tf.contrib.rnn.DropoutWrapper(
-                        tf.contrib.rnn.BasicLSTMCell(self.parameters["hidden_dim"]) if mode == "basic"
-                        else tf.contrib.rnn.LSTMBlockCell(self.parameters["hidden_dim"], forget_bias=0.0),
+                        tf.contrib.rnn.BasicLSTMCell(self.parameters["output_dim"]) if mode == "basic"
+                        else tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"], forget_bias=0.0),
                         output_keep_prob=1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2])
                         for layer in range(num_layers)])
             else:
                 # Layers of lstm cells
-                lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(self.parameters["hidden_dim"])
+                lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(self.parameters["output_dim"])
                                                            if mode == "basic" else
-                                                           tf.contrib.rnn.LSTMBlockCell(self.parameters["hidden_dim"])
+                                                           tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"])
                                                            for _ in range(num_layers)])
 
             # Initial state
@@ -456,16 +454,6 @@ class PD_LSTM_Memory_Model(Brains):
 
             # Outputs and states of lstm layers
             outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, initial_state)
-
-        # Final dense layer weights TODO get rid of maybe and change hidden dim to output dim
-        output_weights = tf.get_variable("output_weights", [self.parameters["hidden_dim"],
-                                                            self.parameters["output_dim"]])
-
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.parameters["output_dim"]])
-
-        # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
-        outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
 
         # Components
         self.components = {"outputs": outputs, "final_state": final_states}

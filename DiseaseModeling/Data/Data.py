@@ -110,10 +110,10 @@ class ReadPD:
             for patient_record in data:
                 for i, inputs in enumerate(patient_record["inputs"]):
                     if inputs.any():
-                        time_dims_separated_data.append({"inputs": inputs,
-                                                         "desired_outputs": patient_record["desired_outputs"][i],
-                                                         "time_dims": patient_record["time_dims"],
-                                                         "time_ahead": patient_record["time_ahead"][i]})
+                        time_dims_separated_data.append({"inputs": [inputs],
+                                                         "desired_outputs": [patient_record["desired_outputs"][i]],
+                                                         "time_dim": patient_record["time_dim"],
+                                                         "time_ahead": [patient_record["time_ahead"][i]]})
 
             # Replace data
             data = time_dims_separated_data

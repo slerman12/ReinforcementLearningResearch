@@ -11,8 +11,8 @@ import numpy as np
 restore = True
 
 # Data reader
-reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"], train_test_split=0.7,
-                     valid_eval_split=0.33, sequence_dropout=False)
+reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
+                     train_test_split=0.7, valid_eval_split=0.33, sequence_dropout=False)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
@@ -29,22 +29,24 @@ memory_data = reader.read(reader.evaluation_data, time_dims_separated=True)
 memory_representation_parameters = brain_parameters.copy()
 memory_representation_parameters["dropout"] = [0, 0, 0]
 memory_representation_parameters["batch_dim"] = len(memory_data["inputs"])
+del memory_representation_parameters["max_time_dim"]
 
 # Memory
 memory = Memories.Memories(capacity=len(reader.evaluation_data), attributes=attributes)
 
 # Agent
-agent = Agent.Regressor(vision=Vision.Vision(brain=Brains.PD_LSTM_Model(brain_parameters)), long_term_memory=memory,
-                        attributes=attributes)
+agent = Agent.LifelongMemory(vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters)),
+                             long_term_memory=memory, attributes=attributes)
 
 # Memory representation
-memory_represent = Agent.Regressor(vision=Vision.Vision(brain=Brains.PD_LSTM_Model(memory_representation_parameters)),
-                                   session=agent.session, scope_name="memory_representation")
+memory_represent = Agent.LifelongMemory(
+    vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(memory_representation_parameters)), attributes=attributes,
+    session=agent.session, scope_name="memory_representation")
 
 # Initialize metrics for measuring performance
-performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
-                                                    "RMSE", "Loss (MSE)"], description=brain_parameters,
-                                      run_throughs_per_epoch=len(reader.training_data) // brain_parameters["batch_dim"])
+performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate", "RMSE", "Loss (MSE)"],
+                                      run_throughs_per_epoch=len(reader.training_data) // brain_parameters["batch_dim"],
+                                      description=brain_parameters)
 
 # TensorBoard
 agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables)
