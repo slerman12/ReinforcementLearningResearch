@@ -216,6 +216,7 @@ class Memories:
                     self.memories[attribute] = np.zeros(self.capacity)
             else:
                 # Otherwise, set memories to population and verify dimensions
+                print(population)
                 shape = population[attribute].shape
                 assert shape[1] == dimensionality if dimensionality > 1 else len(shape) == 1
                 self.memories[attribute] = population[attribute]

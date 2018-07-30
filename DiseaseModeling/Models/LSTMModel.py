@@ -7,7 +7,7 @@ from DiseaseModeling.Data import Data
 import numpy as np
 
 # Restore saved agent
-restore = True
+restore = False
 
 # Data reader
 reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"], train_test_split=0.7,

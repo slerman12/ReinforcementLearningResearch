@@ -2,18 +2,14 @@ from __future__ import division
 import time
 import numpy as np
 import tensorflow as tf
-
 import Brains
 
 
 class Agent:
     def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
                  actions=None, exploration_rate=None, k=None, tensorflow=True, scope_name="training", session=None):
-        # Start timing
+        # Start timing (wall time)
         start_time = time.time()
-
-        # For measuring performance
-        self.timer = 0
 
         # Internal perception of time
         self.perception_of_time = 0
@@ -37,56 +33,30 @@ class Agent:
         self.k = k
 
         # Brain defaults
-        self.brain = self.loss = self.train = self.accuracy = self.gradients = self.variables = \
+        self.brain = self.loss = self.train = self.accuracy = \
+            self.learning_steps = self.increment_learning_steps = self.gradients = self.variables = \
             self.tensorflow_partial_run = self.tensorflow_saver = self.tensorboard_writer = self.tensorboard_logs = None
 
         # If using TensorFlow
         self.tensorflow = tensorflow
 
-        # TensorFlow contexts
-        self.scope_name = scope_name
-        self.session = session
-
-        # If using TensorFlow, open scope, start brains (build graphs), and begin session
+        # If using TensorFlow, create contexts
         if self.tensorflow:
-            with tf.name_scope(self.scope_name):
-                with tf.variable_scope("brain", reuse=None or self.scope_name != "training",
-                                       initializer=None):
-                    # Start vision
-                    if self.vision is not None:
-                        self.vision.start_brain()
+            # Agent's scope name
+            self.scope_name = scope_name
 
-                    # Start brain
-                    self.start_brain()
+            # TensorFlow session
+            self.session = session
 
-                    self.learning_steps = tf.Variable(0, name='learning_steps', trainable=False, dtype=tf.int32)
-                    self.increment_learning_steps = tf.assign_add(self.learning_steps, 1)
-
-            # If no session provided
-            if self.session is None:
-                # For initializing variables
-                initialize_variables = tf.global_variables_initializer()
-
-                # Start session
-                self.session = tf.Session()
-
-                # Initialize variables (only for training)
-                if self.scope_name == "training":
-                    self.session.run(initialize_variables)
-
-            # Assign session to brains
-            self.vision.brain.session = self.session
-            self.brain.session = self.session
-
-            # Saver
-            if self.scope_name == "training":
-                self.tensorflow_saver = tf.train.Saver()
+            # Open scope, start brain graphs, and begin session
+            self.start_tensorflow()
 
         # Measure time
         self.timer = time.time() - start_time
 
     def start_brain(self):
-        pass
+        # Default empty brain
+        self.brain = Brains.Brains(tensorflow=self.tensorflow, session=self.session)
 
     def stop_brain(self):
         # Start timing
@@ -112,6 +82,7 @@ class Agent:
             # Setup a partial run such that the graph is not recomputed later
             partial_run_fetches = [fetch for fetch in [self.train, self.loss] if fetch is not None]
             partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) > 0 else None
+
             # See
             if partial_run_setup is None:
                 scene = self.vision.see(state)
@@ -254,13 +225,21 @@ class Agent:
         if self.long_term_memory is not None:
             self.long_term_memory.consolidate(self.short_term_memory)
 
-        # Train brain
+        # Train brain TODO make this and measure loss prettier
         if self.train is not None and self.tensorflow:
             if self.tensorboard_logs is None:
-                _, _, loss = self.brain.run(placeholders, [self.train, self.loss], self.tensorflow_partial_run)
+                if self.tensorflow_partial_run is None:
+                    _, loss = self.brain.run(placeholders, [self.train, self.loss])
+                else:
+                    _, loss, _ = self.brain.run(placeholders, [self.train, self.loss], self.tensorflow_partial_run)
             else:
-                learning_steps, logs = self.brain.run(components=[self.increment_learning_steps, self.tensorboard_logs])
-                _, loss, logs = self.brain.run(placeholders, [self.train, self.loss], self.tensorflow_partial_run)
+                learning_steps = self.brain.run(components=[self.increment_learning_steps])[0]
+
+                if self.tensorflow_partial_run is None:
+                    _, loss, logs = self.brain.run(placeholders, [self.train, self.loss, self.tensorboard_logs])
+                else:
+                    _, loss, logs, _ = self.brain.run(placeholders, [self.train, self.loss, self.tensorboard_logs],
+                                                      self.tensorflow_partial_run)
 
                 # Output TensorBoard data
                 self.tensorboard_writer.add_summary(logs, learning_steps)
@@ -282,12 +261,12 @@ class Agent:
             else:
                 loss, _ = self.brain.run(data, self.loss, partial_run=self.tensorflow_partial_run)
         else:
-            learning_steps, logs = self.brain.run(components=[self.learning_steps, self.tensorboard_logs])
+            learning_steps = self.brain.run(components=[self.learning_steps])[0]
 
             if self.tensorflow_partial_run is None:
-                loss, logs = self.brain.run(data, [self.loss])
+                loss, logs = self.brain.run(data, [self.loss, self.tensorboard_logs])
             else:
-                loss, logs, _ = self.brain.run(data, [self.loss], partial_run=self.tensorflow_partial_run)
+                loss, logs, _ = self.brain.run(data, [self.loss, self.tensorboard_logs], self.tensorflow_partial_run)
 
             # Output TensorBoard data
             self.tensorboard_writer.add_summary(logs, learning_steps)
@@ -304,6 +283,42 @@ class Agent:
 
         # Move perception of time forward
         self.perception_of_time += time_quantum
+
+    def start_tensorflow(self):
+        # Open scope, start brains (build graphs), and begin session
+        with tf.name_scope(self.scope_name):
+            with tf.variable_scope("brain", reuse=None or self.scope_name != "training", initializer=None):
+                # Start vision
+                if self.vision is not None:
+                    self.vision.start_brain()
+
+                # Start brain
+                self.start_brain()
+
+                # Learning steps counter
+                self.learning_steps = tf.get_variable("learning_steps", [], tf.int32, tf.zeros_initializer(), False)
+                self.increment_learning_steps = tf.assign_add(self.learning_steps, 1)
+
+        # If no session provided
+        if self.session is None:
+            # For initializing variables
+            initialize_variables = tf.global_variables_initializer()
+
+            # Start session
+            self.session = tf.Session()
+
+            # Initialize variables (only for training)
+            if self.scope_name == "training":
+                self.session.run(initialize_variables)
+
+        # Assign session to brains
+        for brain in [self.brain, self.vision.brain]:
+            if brain is not None:
+                brain.session = self.session
+
+        # Saver
+        if self.scope_name == "training":
+            self.tensorflow_saver = tf.train.Saver()
 
     def save(self, filename="Saved/brain"):
         # Save to file
@@ -718,17 +733,17 @@ class Regressor(Agent):
 class LifelongMemory(Agent):
     def start_brain(self):
         # Desired outputs
-        desired_outputs = tf.placeholder("float", [None, None, self.attributes["concepts"]])
+        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
 
         # Time ahead
         time_ahead = tf.placeholder("float", [None, None])
 
         # Retrieved memories
-        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
+        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
         remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
 
-        # Placeholders
-        placeholders = self.vision.brain.placeholders
+        # Placeholders (Note: this would probably modify the placeholders of vision as well if I didn't copy)
+        placeholders = self.vision.brain.placeholders.copy()
         placeholders["desired_outputs"] = desired_outputs
         placeholders["time_ahead"] = time_ahead
         placeholders["remember_concepts"] = remember_concepts

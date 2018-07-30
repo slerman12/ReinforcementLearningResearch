@@ -2,7 +2,7 @@ import tensorflow as tf
 
 
 class Brains:
-    def __init__(self, parameters, brain=None, placeholders=None, components=None, tensorflow=True, session=None):
+    def __init__(self, brain=None, parameters=None, placeholders=None, components=None, tensorflow=True, session=None):
         # Initialize brain 
         self.brain = brain
 
@@ -32,7 +32,8 @@ class Brains:
             if partial_run_setup is None and partial_run is None:
                 # Return the regular run
                 return self.session.run(self.brain if components is None else components,
-                                        feed_dict={self.placeholders[key]: placeholders[key] for key in placeholders})
+                                        feed_dict={self.placeholders[key]: placeholders[key] for key in placeholders
+                                                   if key in self.placeholders and self.placeholders[key] is not None})
             elif partial_run is None:
                 # Otherwise do a "partial run" such that this part of the graph isn't recomputed later when it's reused
                 fetches = partial_run_setup[0] + [self.brain] if components is None else partial_run_setup[0] + \
@@ -42,8 +43,8 @@ class Brains:
 
             # Return the result of the partial run and the partial graph
             return self.session.partial_run(partial_run, self.brain if components is None else components,
-                                            {self.placeholders[key]: placeholders[key] for key in
-                                             placeholders}), partial_run
+                                            {self.placeholders[key]: placeholders[key] for key in placeholders if key in
+                                             self.placeholders and self.placeholders[key] is not None}), partial_run
 
     def build(self):
         pass

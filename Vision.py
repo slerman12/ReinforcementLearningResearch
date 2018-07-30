@@ -37,7 +37,7 @@ class Vision:
                 self.brain.build()
 
     def see(self, state, batch_dims=1, time_dims=1, partial_run_setup=None):
-        # Set state
+        # Set state TODO better to give option to preprocess all data at once if available
         self.state = state
 
         # Greyscale

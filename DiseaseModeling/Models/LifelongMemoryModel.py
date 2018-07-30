@@ -15,7 +15,7 @@ reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS
                      train_test_split=0.7, valid_eval_split=0.33, sequence_dropout=False)
 
 # Brain parameters
-brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
+brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,
                         max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="fused",
                         max_gradient_clip_norm=5, time_ahead=True)
 
@@ -23,12 +23,12 @@ brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128
 attributes = {"concepts": brain_parameters["output_dim"], "attributes": reader.desired_output_dim}
 
 # Memory data
-memory_data = reader.read(reader.evaluation_data, time_dims_separated=True)
+memory_data = reader.read(reader.evaluation_data)
 
 # Memory representation parameters
 memory_representation_parameters = brain_parameters.copy()
 memory_representation_parameters["dropout"] = [0, 0, 0]
-memory_representation_parameters["batch_dim"] = len(memory_data["inputs"])
+memory_representation_parameters["batch_dim"] = len(reader.separate_time_dims(memory_data["inputs"]))
 del memory_representation_parameters["max_time_dim"]
 
 # Memory
@@ -57,11 +57,12 @@ if __name__ == "__main__":
     if restore:
         agent.load()
 
-    # Memory representations (capacity x time x representation)
-    memories = memory_represent.see(memory_data)
+    # Memory representations (records x time x representation)
+    memories = memory_represent.see({"inputs": memory_data["inputs"]})
 
     # Populate memory with representations
-    memory.reset(population=memories)
+    memory.reset(population={"concepts": reader.separate_time_dims(memories),
+                             "attributes": reader.separate_time_dims(memory_data["desired_outputs"])})
 
     # Consolidate memories (build KD tree for them)
     memory.consolidate()
@@ -98,11 +99,12 @@ if __name__ == "__main__":
             # Save agent
             agent.save()
 
-            # Memory representations
-            memories = memory_represent.see(memory_data)
+            # Memory representations (records x time x representation)
+            memories = memory_represent.see({"inputs": memory_data["inputs"]})
 
-            # Replace memories with new representations
-            memory.reset(population=memories)
+            # Populate memory with representations
+            memory.reset(population={"concepts": reader.separate_time_dims(memories),
+                                     "attributes": reader.separate_time_dims(memory_data["desired_outputs"])})
 
             # Consolidate memories (build KD tree for them)
             memory.consolidate()

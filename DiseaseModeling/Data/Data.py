@@ -95,40 +95,6 @@ class ReadPD:
                np.array([patient_records["time_dim"] for patient_records in batch]), \
                np.stack([patient_records["time_ahead"] for patient_records in batch])
 
-    def read(self, data, batch_size=None, time_ahead=False, time_dims_separated=False):
-        # Shuffle testing data
-        random.shuffle(data)
-
-        # Testing batch
-        data = data if batch_size is None else data[:batch_size]
-
-        # If time dims should be separated
-        if time_dims_separated:
-            time_dims_separated_data = []
-
-            # Extract individual time dims from data
-            for patient_record in data:
-                for i, inputs in enumerate(patient_record["inputs"]):
-                    if inputs.any():
-                        time_dims_separated_data.append({"inputs": [inputs],
-                                                         "desired_outputs": [patient_record["desired_outputs"][i]],
-                                                         "time_dim": patient_record["time_dim"],
-                                                         "time_ahead": [patient_record["time_ahead"][i]]})
-
-            # Replace data
-            data = time_dims_separated_data
-
-        # Return test data of batch size
-        if time_ahead:
-            return dict(inputs=np.stack([patient_records["inputs"] for patient_records in data]),
-                        desired_outputs=np.stack([patient_records["desired_outputs"] for patient_records in data]),
-                        time_dims=np.array([patient_records["time_dim"] for patient_records in data]),
-                        time_ahead=np.stack([patient_records["time_ahead"] for patient_records in data]))
-        else:
-            return dict(inputs=np.stack([patient_records["inputs"] for patient_records in data]),
-                        desired_outputs=np.stack([patient_records["desired_outputs"] for patient_records in data]),
-                        time_dims=np.array([patient_records["time_dim"] for patient_records in data]))
-
     def start(self, file, sequence_dropout=False):
         # PD data
         pd_data = []
@@ -191,6 +157,43 @@ class ReadPD:
 
         # Return pd data
         return pd_data
+
+    def read(self, data, batch_size=None, time_ahead=False, time_dims_separated=False):
+        # Shuffle testing data
+        random.shuffle(data)
+
+        # Testing batch
+        data = data if batch_size is None else data[:batch_size]
+
+        # If time dims should be separated
+        if time_dims_separated:
+            time_dims_separated_data = []
+
+            # Extract individual time dims from data
+            for patient_record in data:
+                for i, inputs in enumerate(patient_record["inputs"]):
+                    if inputs.any():
+                        time_dims_separated_data.append({"inputs": [inputs],
+                                                         "desired_outputs": [patient_record["desired_outputs"][i]],
+                                                         "time_dim": patient_record["time_dim"],
+                                                         "time_ahead": [patient_record["time_ahead"][i]]})
+
+            # Replace data
+            data = time_dims_separated_data
+
+        # Return test data of batch size
+        if time_ahead:
+            return dict(inputs=np.stack([patient_records["inputs"] for patient_records in data]),
+                        desired_outputs=np.stack([patient_records["desired_outputs"] for patient_records in data]),
+                        time_dims=np.array([patient_records["time_dim"] for patient_records in data]),
+                        time_ahead=np.stack([patient_records["time_ahead"] for patient_records in data]))
+        else:
+            return dict(inputs=np.stack([patient_records["inputs"] for patient_records in data]),
+                        desired_outputs=np.stack([patient_records["desired_outputs"] for patient_records in data]),
+                        time_dims=np.array([patient_records["time_dim"] for patient_records in data]))
+
+    def separate_time_dims(self, data, time_dims=None):
+        pass
 
 
 # Count missing variables per variable and visit and output summary to csv
