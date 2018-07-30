@@ -2,7 +2,7 @@ import tensorflow as tf
 
 
 class Brains:
-    def __init__(self, brain=None, parameters=None, placeholders=None, components=None, tensorflow=True, session=None):
+    def __init__(self, parameters=None, brain=None, placeholders=None, components=None, tensorflow=True, session=None):
         # Initialize brain 
         self.brain = brain
 

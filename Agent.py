@@ -297,7 +297,14 @@ class Agent:
 
                 # Learning steps counter
                 self.learning_steps = tf.get_variable("learning_steps", [], tf.int32, tf.zeros_initializer(), False)
-                self.increment_learning_steps = tf.assign_add(self.learning_steps, 1)
+
+                # Training only operations
+                if self.scope_name == "training":
+                    # Learning steps incrementer
+                    self.increment_learning_steps = tf.assign_add(self.learning_steps, 1)
+
+                    # Saver
+                    self.tensorflow_saver = tf.train.Saver()
 
         # If no session provided
         if self.session is None:
@@ -315,10 +322,6 @@ class Agent:
         for brain in [self.brain, self.vision.brain]:
             if brain is not None:
                 brain.session = self.session
-
-        # Saver
-        if self.scope_name == "training":
-            self.tensorflow_saver = tf.train.Saver()
 
     def save(self, filename="Saved/brain"):
         # Save to file
