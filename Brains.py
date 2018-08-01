@@ -38,7 +38,7 @@ class Brains:
                 # Otherwise do a "partial run" such that this part of the graph isn't recomputed later when it's reused
                 fetches = partial_run_setup[0] + [self.brain] if components is None else partial_run_setup[0] + \
                                                                                          components
-                feeds = [partial_run_setup[1][key] for key in partial_run_setup[1].keys()]
+                feeds = [partial_run_setup[1][key] for key in partial_run_setup[1]]
                 partial_run = self.session.partial_run_setup(fetches, feeds)
 
             # Return the result of the partial run and the partial graph
@@ -375,6 +375,11 @@ class PD_LSTM_Memory_Model(Brains):
         time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
         self.placeholders = {"inputs": inputs, "time_dims": time_dims}
 
+        # Mask for canceling out padding in dynamic sequences
+        mask = tf.tile(tf.expand_dims(tf.sign(tf.reduce_max(tf.abs(self.placeholders["inputs"]), axis=2)), axis=2),
+                       [1, 1, self.parameters["output_dim"]])
+        self.components = {"mask": mask}
+
         # Default cell mode ("basic", "block", "cudnn") and number of layers
         mode = self.parameters["mode"] if "mode" in self.parameters else "block"
         num_layers = self.parameters["num_layers"] if "num_layers" in self.parameters else 1
@@ -397,7 +402,7 @@ class PD_LSTM_Memory_Model(Brains):
                                        self.parameters["output_dim"]], tf.float32),
                              tf.zeros([num_layers, self.parameters["batch_dim"],
                                        self.parameters["output_dim"]], tf.float32))
-            self.placeholders["initial_state"] = initial_state
+            # self.placeholders["initial_state"] = initial_state
 
             # Outputs and states of lstm layers
             outputs, final_states = lstm_layers(inputs, initial_state)
@@ -451,13 +456,16 @@ class PD_LSTM_Memory_Model(Brains):
 
             # Initial state
             initial_state = lstm_layers.zero_state(self.parameters["batch_dim"], tf.float32)
-            self.placeholders["initial_state"] = initial_state
+            # self.placeholders["initial_state"] = initial_state
 
             # Outputs and states of lstm layers
             outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, initial_state)
 
+        # Mask for canceling out padding in dynamic sequences
+        outputs *= self.components["mask"]
+
         # Components
-        self.components = {"outputs": outputs, "final_state": final_states}
+        self.components.update({"outputs": outputs, "final_state": final_states})
 
         # Brain
         self.brain = self.components["outputs"]

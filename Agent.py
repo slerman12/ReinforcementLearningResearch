@@ -33,9 +33,9 @@ class Agent:
         self.k = k
 
         # Brain defaults
-        self.brain = self.loss = self.train = self.accuracy = \
-            self.learning_steps = self.increment_learning_steps = self.gradients = self.variables = \
-            self.tensorflow_partial_run = self.tensorflow_saver = self.tensorboard_writer = self.tensorboard_logs = None
+        self.brain = self.loss = self.train = self.accuracy = self.learning_steps = self.increment_learning_steps = \
+            self.gradients = self.variables = self.tensorflow_partial_run = self.tensorflow_saver = \
+            self.tensorboard_logging_interval = self.tensorboard_writer = self.tensorboard_logs = None
 
         # If using TensorFlow
         self.tensorflow = tensorflow
@@ -80,7 +80,8 @@ class Agent:
             scene = state
         elif self.tensorflow:
             # Setup a partial run such that the graph is not recomputed later
-            partial_run_fetches = [fetch for fetch in [self.train, self.loss] if fetch is not None]
+            partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] if fetch is
+                                   not None]
             partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) > 0 else None
 
             # See
@@ -98,9 +99,18 @@ class Agent:
         # Return scene
         return scene
 
-    def remember(self, concept, batch_dims=1, max_time_dim=1, time_dims=None):
+    def remember(self, concept, batch_dims=None, max_time_dim=None, time_dims=None):
         # Start timing
         start_time = time.time()
+
+        # Initialize batch dims
+        batch_dims = concept.shape[0] if batch_dims is None else batch_dims
+
+        # Initialize max time dim
+        max_time_dim = concept.shape[1] if max_time_dim is None else max_time_dim
+
+        # Initialize time dims
+        time_dims = np.full(batch_dims, max_time_dim) if time_dims is None else time_dims
 
         # Initialize memories
         remember_concepts = np.zeros([batch_dims, max_time_dim, self.k, self.attributes["concepts"]])
@@ -109,16 +119,12 @@ class Agent:
         # Initialize duplicate (negative means no duplicate)
         duplicate = []
 
-        # Initialize default time dims
-        if time_dims is None:
-            time_dims = np.full(batch_dims, max_time_dim)
-
         # Memory Module
         if self.long_term_memory is not None:
             # For each batch
             for batch_dim in range(batch_dims):
                 # For each time
-                for time_dim in range(time_dims):
+                for time_dim in range(time_dims[batch_dim]):
                     # If padding
                     if time_dim > time_dims[batch_dim]:
                         break
@@ -227,19 +233,20 @@ class Agent:
 
         # Train brain TODO make this and measure loss prettier
         if self.train is not None and self.tensorflow:
-            if self.tensorboard_logs is None:
+            # Increment learning steps
+            learning_steps = self.brain.run(components=[self.increment_learning_steps])[0]
+
+            if self.tensorboard_logs is None or learning_steps % self.tensorboard_logging_interval:
                 if self.tensorflow_partial_run is None:
                     _, loss = self.brain.run(placeholders, [self.train, self.loss])
                 else:
-                    _, loss, _ = self.brain.run(placeholders, [self.train, self.loss], self.tensorflow_partial_run)
+                    (_, loss), _ = self.brain.run(placeholders, [self.train, self.loss], self.tensorflow_partial_run)
             else:
-                learning_steps = self.brain.run(components=[self.increment_learning_steps])[0]
-
                 if self.tensorflow_partial_run is None:
                     _, loss, logs = self.brain.run(placeholders, [self.train, self.loss, self.tensorboard_logs])
                 else:
-                    _, loss, logs, _ = self.brain.run(placeholders, [self.train, self.loss, self.tensorboard_logs],
-                                                      self.tensorflow_partial_run)
+                    (_, loss, logs), _ = self.brain.run(placeholders, [self.train, self.loss, self.tensorboard_logs],
+                                                        self.tensorflow_partial_run)
 
                 # Output TensorBoard data
                 self.tensorboard_writer.add_summary(logs, learning_steps)
@@ -254,19 +261,20 @@ class Agent:
         # Start timing
         start_time = time.time()
 
+        # Learning steps
+        learning_steps = self.brain.run(components=[self.learning_steps])[0]
+
         # Get loss
-        if self.tensorboard_logs is None:
+        if self.tensorboard_logs is None or learning_steps % self.tensorboard_logging_interval:
             if self.tensorflow_partial_run is None:
                 loss = self.brain.run(data, self.loss)
             else:
                 loss, _ = self.brain.run(data, self.loss, partial_run=self.tensorflow_partial_run)
         else:
-            learning_steps = self.brain.run(components=[self.learning_steps])[0]
-
             if self.tensorflow_partial_run is None:
                 loss, logs = self.brain.run(data, [self.loss, self.tensorboard_logs])
             else:
-                loss, logs, _ = self.brain.run(data, [self.loss, self.tensorboard_logs], self.tensorflow_partial_run)
+                (loss, logs), _ = self.brain.run(data, [self.loss, self.tensorboard_logs], self.tensorflow_partial_run)
 
             # Output TensorBoard data
             self.tensorboard_writer.add_summary(logs, learning_steps)
@@ -333,10 +341,13 @@ class Agent:
             self.tensorflow_saver.restore(self.session, filename)
 
     def start_tensorboard(self, scalars=None, gradients=None, variables=None, tensorboard_writer=None,
-                          directory_name="Logs"):
+                          logging_interval=1, directory_name="Logs"):
         # Defaults
         if scalars is None:
             scalars = {}
+
+        # Logging interval
+        self.tensorboard_logging_interval = logging_interval
 
         # Scope
         with tf.name_scope(self.scope_name):
@@ -752,12 +763,20 @@ class LifelongMemory(Agent):
         placeholders["remember_concepts"] = remember_concepts
         placeholders["remember_attributes"] = remember_attributes
 
-        # Weights
-        weights = tf.norm(remember_concepts - self.vision.brain.brain, axis=3)
+        # Distances (batch x time x k)
+        distances = tf.norm(remember_concepts - tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2),
+                                                        [1, 1, self.k, 1]), axis=3)
 
-        # Distance weighted memory attributes
-        distance_weighted_memory_attributes = tf.divide(tf.reduce_sum(weights * remember_attributes, axis=2),
-                                                        tf.reduce_sum(weights, axis=2))
+        # Weights (batch x time x k x attributes)
+        weights = tf.tile(tf.expand_dims(distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for normalizing weighted averages)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)
+        denominator = tf.reduce_sum(weights, axis=2)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        distance_weighted_memory_attributes = tf.where(tf.less(denominator, 1e-7), denominator, tf.divide(numerator,
+                                                                                                          denominator))
 
         # Add time ahead before final dense layer
         outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(time_ahead, 2)], 2) \
@@ -817,7 +836,11 @@ class LifelongMemory(Agent):
                                                                self.brain.parameters["max_gradient_clip_norm"])
 
                     # Training
-                    self.train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
                 else:
                     # Training
-                    self.train = optimizer.minimize(self.loss)
+                    train = optimizer.minimize(self.loss)
+
+                # Dummy train operation for partial run
+                with tf.control_dependencies([train]):
+                    self.train = tf.constant(0)

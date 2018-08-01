@@ -8,7 +8,7 @@ from DiseaseModeling.Data import Data
 import numpy as np
 
 # Restore saved agent
-restore = True
+restore = False
 
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
@@ -16,7 +16,7 @@ reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,
-                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="fused",
+                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="block",
                         max_gradient_clip_norm=5, time_ahead=True)
 
 # Attributes
@@ -28,18 +28,17 @@ memory_data = reader.read(reader.evaluation_data)
 # Memory representation parameters
 memory_representation_parameters = brain_parameters.copy()
 memory_representation_parameters["dropout"] = [0, 0, 0]
-memory_representation_parameters["batch_dim"] = len(reader.separate_time_dims(memory_data["inputs"]))
-del memory_representation_parameters["max_time_dim"]
+memory_representation_parameters["batch_dim"] = memory_data["inputs"].shape[0]
 
 # Memory
-memory = Memories.Memories(capacity=len(reader.evaluation_data), attributes=attributes)
+memory = Memories.Memories(capacity=reader.separate_time_dims(memory_data["inputs"]).shape[0], attributes=attributes)
 
 # Agent
 agent = Agent.LifelongMemory(vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters)),
-                             long_term_memory=memory, attributes=attributes)
+                             long_term_memory=memory, attributes=attributes, k=2)
 
 # Memory representation
-memory_represent = Agent.LifelongMemory(
+memory_represent = Agent.Agent(
     vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(memory_representation_parameters)), attributes=attributes,
     session=agent.session, scope_name="memory_representation")
 
@@ -49,16 +48,17 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       description=brain_parameters)
 
 # TensorBoard
-agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables)
+agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
+                        logging_interval=10, directory_name="Logs/LifelongMemoryModel/time_ahead")
 
 # Main method
 if __name__ == "__main__":
     # Load agent
     if restore:
-        agent.load()
+        agent.load("Saved/LifelongMemoryModel/time_ahead/brain")
 
-    # Memory representations (records x time x representation)
-    memories = memory_represent.see({"inputs": memory_data["inputs"]})
+    # Memory representations
+    memories = memory_represent.see(memory_data)
 
     # Populate memory with representations
     memory.reset(population={"concepts": reader.separate_time_dims(memories),
@@ -79,8 +79,7 @@ if __name__ == "__main__":
         scene = agent.see({"inputs": inputs, "time_dims": time_dims})
 
         # Remember
-        remember_concepts, remember_attributes = agent.remember(scene, brain_parameters["batch_dims"],
-                                                                brain_parameters["max_time_dim"], time_dims)
+        remember_concepts, remember_attributes = agent.remember(scene, time_dims=time_dims)
 
         # Train
         loss = agent.learn({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
@@ -97,10 +96,10 @@ if __name__ == "__main__":
         # End of epoch
         if performance.is_epoch(episode):
             # Save agent
-            agent.save()
+            agent.save("Saved/LifelongMemoryModel/time_ahead/brain")
 
-            # Memory representations (records x time x representation)
-            memories = memory_represent.see({"inputs": memory_data["inputs"]})
+            # Memory representations
+            memories = memory_represent.see(memory_data)
 
             # Populate memory with representations
             memory.reset(population={"concepts": reader.separate_time_dims(memories),

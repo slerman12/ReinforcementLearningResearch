@@ -95,7 +95,7 @@ class ReadPD:
                np.array([patient_records["time_dim"] for patient_records in batch]), \
                np.stack([patient_records["time_ahead"] for patient_records in batch])
 
-    def start(self, file, sequence_dropout=False):
+    def start(self, file, sequence_dropout_prob=0):
         # PD data
         pd_data = []
 
@@ -105,12 +105,20 @@ class ReadPD:
             patient_records = file[file["PATNO"] == patient].sort_values(["INFODT"])
 
             # If sequence dropout
-            if sequence_dropout:
-                # Pick a sequence length between 2 and the actual sequence length
-                sequence_length = np.random.choice(range(2, patient_records.shape[0] + 1))
+            if sequence_dropout_prob:
+                # Patient records to use
+                patient_record_indices = []
 
-                # Take a subset of the sequences of this length
-                patient_record_indices = np.random.choice(range(patient_records.shape[0]), sequence_length, False)
+                # Sequence dropout
+                for index, _ in enumerate(patient_records):
+                    if random.random() >= sequence_dropout_prob:
+                        patient_record_indices.append(index)
+
+                # # Pick a sequence length between 2 and the actual sequence length
+                # sequence_length = np.random.choice(range(2, patient_records.shape[0] + 1))
+                #
+                # # Take a subset of the sequences of this length
+                # patient_record_indices = np.random.choice(range(patient_records.shape[0]), sequence_length, False)
 
                 # Select patient records (and explicitly sort them by their date again to be safe)
                 patient_records = patient_records.iloc[patient_record_indices].sort_values(["INFODT"])
@@ -192,8 +200,32 @@ class ReadPD:
                         desired_outputs=np.stack([patient_records["desired_outputs"] for patient_records in data]),
                         time_dims=np.array([patient_records["time_dim"] for patient_records in data]))
 
-    def separate_time_dims(self, data, time_dims=None):
-        pass
+    def separate_time_dims(self, data, batch_dims=None, max_time_dim=None, time_dims=None):
+        # Initialize batch dims
+        batch_dims = data.shape[0] if batch_dims is None else batch_dims
+
+        # Initialize max time dim
+        max_time_dim = data.shape[1] if max_time_dim is None else max_time_dim
+
+        # Initialize time dims
+        time_dims = np.full(batch_dims, max_time_dim) if time_dims is None else time_dims
+
+        # Time dims separated
+        time_dims_separated_data = []
+
+        # For each batch
+        for batch_dim in range(batch_dims):
+            # For each time
+            for time_dim in range(time_dims[batch_dim]):
+                # If padding
+                if data[batch_dim, time_dim].any():
+                    # Add record
+                    time_dims_separated_data.append(data[batch_dim, time_dim])
+                else:
+                    break
+
+        # Return time dims separated
+        return np.array(time_dims_separated_data)
 
 
 # Count missing variables per variable and visit and output summary to csv

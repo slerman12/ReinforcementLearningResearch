@@ -178,7 +178,7 @@ class Memories:
         # If memories in memory and modified, consolidate tree
         if self.length > 0 and self.modified:
             # Build tree of long term memories
-            self.tree = KDTree(self.memories["scene"][:self.length], leaf_size=leaf_size)
+            self.tree = KDTree(self.memories[list(self.attributes.keys())[0]][:self.length], leaf_size=leaf_size)
             # self.tree = KDTree(self.memories[:self.length, :-num_attributes], leaf_size=math.ceil(self.length / 250))
             # self.tree = FLANN()
             # self.tree.build_index(self.memories[:self.length, :-num_attributes])
@@ -216,7 +216,6 @@ class Memories:
                     self.memories[attribute] = np.zeros(self.capacity)
             else:
                 # Otherwise, set memories to population and verify dimensions
-                print(population)
                 shape = population[attribute].shape
                 assert shape[1] == dimensionality if dimensionality > 1 else len(shape) == 1
                 self.memories[attribute] = population[attribute]
