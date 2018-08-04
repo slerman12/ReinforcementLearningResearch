@@ -8,11 +8,11 @@ from DiseaseModeling.Data import Data
 import numpy as np
 
 # Restore saved agent
-restore = False
+restore = True
 
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
-                     train_test_split=0.7, valid_eval_split=0.33, sequence_dropout=False)
+                     train_test_split=0.7, valid_eval_split=0.33, sequence_dropout=0)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,

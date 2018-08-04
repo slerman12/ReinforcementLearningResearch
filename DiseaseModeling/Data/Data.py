@@ -110,8 +110,10 @@ class ReadPD:
                 patient_record_indices = []
 
                 # Sequence dropout
-                for index, _ in enumerate(patient_records):
-                    if random.random() >= sequence_dropout_prob:
+                for index in range(patient_records.shape[0]):
+                    if random.random() >= sequence_dropout_prob or \
+                            (index == patient_records.shape[0] - 2 and len(patient_record_indices) == 0) or \
+                            (index == patient_records.shape[0] - 1 and len(patient_record_indices) == 1):
                         patient_record_indices.append(index)
 
                 # # Pick a sequence length between 2 and the actual sequence length
@@ -121,7 +123,7 @@ class ReadPD:
                 # patient_record_indices = np.random.choice(range(patient_records.shape[0]), sequence_length, False)
 
                 # Select patient records (and explicitly sort them by their date again to be safe)
-                patient_records = patient_records.iloc[patient_record_indices].sort_values(["INFODT"])
+                patient_records = patient_records.iloc[patient_record_indices, :].sort_values(["INFODT"])
 
             # Time dimensions
             time_dim = patient_records.shape[0] - 1
