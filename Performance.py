@@ -92,8 +92,8 @@ class Performance:
             return True
         return False
 
-    def is_epoch(self, run_through):
-        return run_through % self.run_throughs_per_epoch == 0 or run_through == 1
+    def is_epoch(self, run_through, interval=1):
+        return (run_through / interval) % self.run_throughs_per_epoch == 0 or run_through == 1
 
     def add_tensorboard_logs(self, logs):
         # Add logs to list of TensorBoard logs

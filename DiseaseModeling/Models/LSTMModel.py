@@ -6,7 +6,7 @@ import Brains
 from DiseaseModeling.Data import Data
 import numpy as np
 
-# Restore saved agent 
+# Restore saved agent
 restore = False
 
 # Model directory
@@ -43,7 +43,7 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
 
 # TensorBoard
 agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
-                        logging_interval=100, directory_name="Models/Logs/LSTMModel/time_ahead_and_sequence_dropout")
+                        logging_interval=100, directory_name="Models/Logs/{}".format(model_directory))
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
                            directory_name="Models/Logs/{}".format(model_directory))
 
