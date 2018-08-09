@@ -10,9 +10,12 @@ import numpy as np
 # Restore saved agent
 restore = True
 
+# Model directory
+model_directory = "LifelongMemoryModel/time_ahead"
+
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
-                     train_test_split=0.7, valid_eval_split=0.33, sequence_dropout=0)
+                     train_test_split=0.8, train_memory_split=0.75, valid_eval_split=1, sequence_dropout=0)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,
@@ -23,7 +26,7 @@ brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128
 attributes = {"concepts": brain_parameters["output_dim"], "attributes": reader.desired_output_dim}
 
 # Memory data
-memory_data = reader.read(reader.evaluation_data)
+memory_data = reader.read(reader.memory_data)
 
 # Memory representation parameters
 memory_representation_parameters = brain_parameters.copy()
@@ -32,6 +35,11 @@ memory_representation_parameters["batch_dim"] = memory_data["inputs"].shape[0]
 
 # Memory
 memory = Memories.Memories(capacity=reader.separate_time_dims(memory_data["inputs"]).shape[0], attributes=attributes)
+
+# TODO
+# memory = Memories.Memories(capacity, attributes, brain=vision.adapt(bla)) (vision just calls brain.adapt)
+# No memory_represent; initialize memory brain session in Agent
+# memories = memory.represent(memory_data)
 
 # Agent
 agent = Agent.LifelongMemory(vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters)),
@@ -97,6 +105,12 @@ if __name__ == "__main__":
         if performance.is_epoch(episode):
             # Save agent
             agent.save("Saved/LifelongMemoryModel/time_ahead/brain")
+
+            # Shuffle training/memory split
+            reader.shuffle_training_memory_split()
+
+            # Read new memory data
+            memory_data = reader.read(reader.memory_data)
 
             # Memory representations
             memories = memory_represent.see(memory_data)

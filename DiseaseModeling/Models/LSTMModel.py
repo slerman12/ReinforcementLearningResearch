@@ -6,16 +6,19 @@ import Brains
 from DiseaseModeling.Data import Data
 import numpy as np
 
-# Restore saved agent
+# Restore saved agent 
 restore = False
+
+# Model directory
+model_directory = "LSTMModel/time_ahead_and_sequence_dropout"
 
 # Data reader
 reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"], train_test_split=0.7,
-                     valid_eval_split=1, sequence_dropout=0.2)
+                     valid_eval_split=1, sequence_dropout=0)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
-                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="fused",
+                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="fused",
                         max_gradient_clip_norm=5, time_ahead=True)
 
 # Validation data
@@ -42,13 +45,13 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
 agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
                         logging_interval=100, directory_name="Models/Logs/LSTMModel/time_ahead_and_sequence_dropout")
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-                           directory_name="Models/Logs/LSTMModel/time_ahead_and_sequence_dropout")
+                           directory_name="Models/Logs/{}".format(model_directory))
 
 # Main method
 if __name__ == "__main__":
     # Load agent
     if restore:
-        agent.load("Models/Saved/LSTMModel/time_ahead_and_sequence_dropout/brain")
+        agent.load("Models/Saved/{}/brain".format(model_directory))
 
     # Training iterations
     for episode in range(1, 100000000000 + 1):
@@ -75,4 +78,4 @@ if __name__ == "__main__":
 
         # Save agent
         if performance.is_epoch(episode):
-            agent.save("Models/Saved/LSTMModel/time_ahead_and_sequence_dropout/brain")
+            agent.save("Models/Saved/{}/brain".format(model_directory))

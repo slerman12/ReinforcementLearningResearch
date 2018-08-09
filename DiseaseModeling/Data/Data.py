@@ -6,7 +6,8 @@ import random
 
 # Data handler
 class ReadPD:
-    def __init__(self, filename, targets, to_drop=None, train_test_split=1, valid_eval_split=0, sequence_dropout=False):
+    def __init__(self, filename, targets, to_drop=None, train_test_split=1, train_memory_split=0, valid_eval_split=0,
+                 sequence_dropout=False):
         # Processed data file
         file = pd.read_csv(filename)
 
@@ -18,6 +19,9 @@ class ReadPD:
 
         # Make sure time column is in date time format
         file["INFODT"] = pd.to_datetime(file["INFODT"])
+
+        # Train memory split
+        self.train_memory_split = train_memory_split
 
         # Train test split
         self.train_test_split = train_test_split
@@ -50,7 +54,11 @@ class ReadPD:
         random.Random(4).shuffle(patients)
 
         # Split into training, validation, and evaluation data
-        self.training_data_patients = patients[:round(self.train_test_split * len(patients))]
+        self.training_memory_data_patients = patients[:round(self.train_test_split * len(patients))]
+        self.training_data_patients = self.training_memory_data_patients[
+                                      :round(self.train_memory_split * len(self.training_memory_data_patients))]
+        self.memory_data_patients = self.training_memory_data_patients[
+                                    round(self.train_memory_split * len(self.training_memory_data_patients)):]
         self.testing_data_patients = patients[round(self.train_test_split * len(patients)):]
         self.validation_data_patients = self.testing_data_patients[:round(self.valid_eval_split *
                                                                           len(self.testing_data_patients))]
@@ -59,11 +67,15 @@ class ReadPD:
 
         # Assigns data sets
         self.training_data_file = file[file["PATNO"].isin(self.training_data_patients)]
+        self.memory_data_file = file[file["PATNO"].isin(self.memory_data_patients)]
+        self.training_memory_data_file = file[file["PATNO"].isin(self.training_memory_data_patients)]
         self.validation_data_file = file[file["PATNO"].isin(self.validation_data_patients)]
         self.evaluation_data_file = file[file["PATNO"].isin(self.evaluation_data_patients)]
 
         # Create data
         self.training_data = self.start(self.training_data_file, self.sequence_dropout)
+        self.memory_data = self.start(self.training_data_file, self.sequence_dropout)
+        self.training_memory_data = self.start(self.training_memory_data_file)
         self.validation_data = self.start(self.validation_data_file)
         self.evaluation_data = self.start(self.evaluation_data_file)
 
@@ -228,6 +240,29 @@ class ReadPD:
 
         # Return time dims separated
         return np.array(time_dims_separated_data)
+
+    def shuffle_training_memory_split(self):
+        # Shuffle patients
+        random.Random(4).shuffle(self.training_memory_data_patients)
+
+        # Split into training and memory data
+        self.training_data_patients = self.training_memory_data_patients[
+                                      :round(self.train_memory_split * len(self.training_memory_data_patients))]
+        self.memory_data_patients = self.training_memory_data_patients[
+                                    round(self.train_memory_split * len(self.training_memory_data_patients)):]
+
+        # Assigns data sets
+        self.memory_data_file = self.training_memory_data_file[
+            self.training_memory_data_file["PATNO"].isin(self.memory_data_patients)]
+        self.training_memory_data_file = self.training_memory_data_file[
+            self.training_memory_data_file["PATNO"].isin(self.training_memory_data_patients)]
+
+        # Create data
+        self.training_data = self.start(self.training_data_file, self.sequence_dropout)
+        self.memory_data = self.start(self.training_data_file, self.sequence_dropout)
+
+        # Variable for iterating batches
+        self.batch_begin = 0
 
 
 # Count missing variables per variable and visit and output summary to csv
