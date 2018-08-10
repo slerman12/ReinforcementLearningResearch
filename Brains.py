@@ -444,7 +444,7 @@ class PD_LSTM_Memory_Model(Brains):
                 lstm_layers = tf.contrib.rnn.MultiRNNCell(
                     [tf.contrib.rnn.DropoutWrapper(
                         tf.contrib.rnn.BasicLSTMCell(self.parameters["output_dim"]) if mode == "basic"
-                        else tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"], forget_bias=0.0),
+                        else tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"], forget_bias=5),
                         output_keep_prob=1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2])
                         for layer in range(num_layers)])
             else:

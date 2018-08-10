@@ -8,10 +8,10 @@ from DiseaseModeling.Data import Data
 import numpy as np
 
 # Restore saved agent
-restore = True
+restore = False
 
 # Model directory
-model_directory = "LifelongMemoryModel/time_ahead"
+model_directory = "LifelongMemoryModel/no_final_dense_layer"
 
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
@@ -19,23 +19,23 @@ reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,
-                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="block",
+                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="block",
                         max_gradient_clip_norm=5, time_ahead=True)
 
 # Attributes
 attributes = {"concepts": brain_parameters["output_dim"], "attributes": reader.desired_output_dim}
-
-# Validation data
-validation_data = reader.read(reader.validation_data, time_ahead=brain_parameters["time_ahead"])
 
 # Validation parameters
 validation_parameters = brain_parameters.copy()
 validation_parameters["dropout"] = [0, 0, 0]
 validation_parameters["batch_dim"] = len(reader.validation_data)
 
+# Validation data
+validation_data = reader.read(reader.validation_data, time_ahead=validation_parameters["time_ahead"])
+
 # Memory data
 memory_data = reader.read(reader.memory_data)
-validation_memory_data = reader.read(reader.training_memory_data, time_ahead=brain_parameters["time_ahead"])
+validation_memory_data = reader.read(reader.training_memory_data)
 
 # Memory representation parameters
 memory_representation_parameters = brain_parameters.copy()
@@ -57,22 +57,22 @@ validation_memory = Memories.Memories(capacity=reader.separate_time_dims(validat
 
 # Agent
 agent = Agent.LifelongMemory(vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters)),
-                             long_term_memory=agent_memory, attributes=attributes, k=2)
+                             long_term_memory=agent_memory, attributes=attributes, k=10)
 
 # Validation
 validate = Agent.LifelongMemory(vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(validation_parameters)),
-                                long_term_memory=validation_memory, attributes=attributes, k=2, session=agent.session,
+                                long_term_memory=validation_memory, attributes=attributes, k=10, session=agent.session,
                                 scope_name="validating")
 
 # Memory representation
 memory_represent = Agent.Agent(
-    vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(memory_representation_parameters)), attributes=attributes,
+    vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(memory_representation_parameters)),
     session=agent.session, scope_name="memory_representation")
 
 # Validation memory representation
 validation_memory_represent = Agent.Agent(
     vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(validation_memory_represent_parameters)),
-    attributes=attributes, session=agent.session, scope_name="validation_memory_representation")
+    session=agent.session, scope_name="validation_memory_representation")
 
 # Initialize metrics for measuring performance
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
@@ -81,7 +81,8 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       description=brain_parameters)
 
 # TensorBoard
-agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
+agent.start_tensorboard(scalars={"Loss MSE": agent.loss},
+                        # gradients=agent.gradients, variables=agent.variables,
                         logging_interval=10, directory_name="Logs/{}".format(model_directory))
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
                            directory_name="Logs/{}".format(model_directory))
@@ -125,6 +126,8 @@ if __name__ == "__main__":
         loss = agent.learn({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
                             "desired_outputs": desired_outputs, "time_ahead": time_ahead,
                             "learning_rate": learning_rate})
+
+        # print(agent.vision.see({"inputs": np.ones(inputs.shape), "time_dims": time_dims}))
 
         # Validation
         if performance.is_epoch(episode, interval=5):

@@ -2,6 +2,7 @@ from __future__ import division
 import time
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.framework import function  # For overriding norm gradient in Lifelong Memory Model
 import Brains
 
 
@@ -73,6 +74,19 @@ class Agent:
     def see(self, state, batch_dims=1, time_dims=1):
         # Start timing
         start_time = time.time()
+        # print()
+        # print("YAAAAA")
+        # print(state["inputs"][-1].any(axis=1))
+        # print(state["inputs"])
+        # print(np.isnan(state["inputs"][-1]).any(axis=1))
+        # print(state["time_dims"][-1])
+        # print()
+        # print(np.isnan(state["time_dims"]).any())
+        # print()
+        # print(state["inputs"].shape[0])
+
+        # print(self.vision.brain.run({"inputs": np.ones(state["inputs"].shape), "time_dims": state["time_dims"]}))
+        # print(state["inputs"][-1][0])
 
         # Vision
         if self.vision is None:
@@ -95,6 +109,11 @@ class Agent:
 
         # Measure time
         self.timer = time.time() - start_time
+
+        # print(scene[-1].any(axis=1))
+        # print(scene.shape[0])
+        #
+        # print(scene[-1])
 
         # Return scene
         return scene
@@ -125,26 +144,22 @@ class Agent:
             for batch_dim in range(batch_dims):
                 # For each time
                 for time_dim in range(time_dims[batch_dim]):
-                    # If padding
-                    if time_dim > time_dims[batch_dim]:
-                        break
-                    else:
-                        # Number of similar memories
-                        num_similar_memories = min(self.long_term_memory.length, self.k)
+                    # Number of similar memories
+                    num_similar_memories = min(self.long_term_memory.length, self.k)
 
-                        # If there are memories to draw from
-                        if num_similar_memories > 0:
-                            # Query to memory
-                            query = concept[batch_dim, time_dim]
+                    # If there are memories to draw from
+                    if num_similar_memories > 0:
+                        # Query to memory
+                        query = concept[batch_dim, time_dim]
 
-                            # If not all zero
-                            if query.any():
-                                # Similar memories TODO check if duplicate with distance == 0
-                                distances, indices = self.long_term_memory.retrieve(query, self.k)
-                                remember_concepts[batch_dim, time_dim] = \
-                                    self.long_term_memory.memories["concepts"][indices]
-                                remember_attributes[batch_dim, time_dim] = \
-                                    self.long_term_memory.memories["attributes"][indices]
+                        # If not all zero
+                        if query.any():
+                            # Similar memories TODO check if duplicate with distance == 0 TODO account for <k memory
+                            distances, indices = self.long_term_memory.retrieve(query, self.k)
+                            remember_concepts[batch_dim, time_dim] = \
+                                self.long_term_memory.memories["concepts"][indices]
+                            remember_attributes[batch_dim, time_dim] = \
+                                self.long_term_memory.memories["attributes"][indices]
 
         # Measure time
         self.timer = time.time() - start_time
@@ -764,35 +779,58 @@ class LifelongMemory(Agent):
         placeholders["remember_attributes"] = remember_attributes
 
         # Distances (batch x time x k)
-        distances = tf.norm(remember_concepts - tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2),
-                                                        [1, 1, self.k, 1]), axis=3)
+        # distances = tf.norm(remember_concepts - tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2),
+        #                                                 [1, 1, self.k, 1]), axis=3)
+        # TensorFlow norm passes weird gradients! (https://github.com/tensorflow/tensorflow/issues/12071)
+        # Temporarily using L2 distance squared; might as well use normalized cosine similarity.
+        # Note: my k-NN is using L2.
+        # distances = tf.reduce_sum(tf.squared_difference(remember_concepts,
+        #                                                 tf.tile(tf.expand_dims(self.vision.brain.brain,
+        #                                                                        axis=2), [1, 1, self.k, 1])), axis=3)
+        # Distances (batch x time x k) accounting for nan gradients for square root of 0
+        # distances = tf.sqrt(tf.clip_by_value(tf.reduce_sum(
+        #     tf.squared_difference(tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2), [1, 1, self.k, 1]),
+        #                           remember_concepts), axis=3), 1e-12, 1e12))  # Check andrej blog about clip by value
+        # Weights (batch x time x k x attributes)
+        # weights = tf.tile(tf.expand_dims(1.0 / (distances + 0.001), axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # To prevent division by 0 and to prevent NaN gradients from square root of 0
+        distance_delta = 0.001
+
+        # Distances (batch x time x k)
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2),
+                                                                        [1, 1, self.k, 1]), remember_concepts), axis=3)
+                            + distance_delta ** 2)
 
         # Weights (batch x time x k x attributes)
-        weights = tf.tile(tf.expand_dims(distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+        weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
 
-        # Division numerator and denominator (for normalizing weighted averages)
-        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)
-        denominator = tf.reduce_sum(weights, axis=2)
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
 
         # Distance weighted memory attributes (batch x time x attributes)
-        distance_weighted_memory_attributes = tf.where(tf.less(denominator, 1e-7), denominator, tf.divide(numerator,
-                                                                                                          denominator))
+        distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
+        outputs = distance_weighted_memory_attributes
 
-        # Add time ahead before final dense layer
-        outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(time_ahead, 2)], 2) \
-            if self.vision.brain.parameters["time_ahead"] else distance_weighted_memory_attributes
-
-        # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [self.attributes["attributes"] + 1 if
-                                                            self.vision.brain.parameters["time_ahead"] else
-                                                            self.attributes["attributes"],
-                                                            self.attributes["attributes"]])
-
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.attributes["attributes"]])
-
-        # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
-        outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
+        # # Add time ahead before final dense layer
+        # outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(time_ahead, 2)], 2) \
+        #     if self.vision.brain.parameters["time_ahead"] else distance_weighted_memory_attributes
+        #
+        # # Final dense layer weights
+        # output_weights = tf.get_variable("output_weights", [self.attributes["attributes"] + 1 if
+        #                                                     self.vision.brain.parameters["time_ahead"] else
+        #                                                     self.attributes["attributes"],
+        #                                                     self.attributes["attributes"]])
+        #
+        # # Final dense layer bias
+        # output_bias = tf.get_variable("output_bias", [self.attributes["attributes"]])
+        #
+        # # # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
+        # outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
 
         # Set brain for agent
         self.brain = Brains.Brains(brain=outputs, parameters=self.vision.brain.parameters, placeholders=placeholders)
