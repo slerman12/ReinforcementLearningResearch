@@ -1,4 +1,5 @@
 import tensorflow as tf
+from copy import deepcopy
 
 
 class Brains:
@@ -48,6 +49,38 @@ class Brains:
 
     def build(self):
         pass
+
+    def adapt(self, parameters=None, placeholders=None, components=None, tensorflow=None, session=None):
+        # Default mutations
+        if parameters is None:
+            parameters = {}
+        if placeholders is None:
+            placeholders = {}
+        if components is None:
+            components = {}
+        if tensorflow is None:
+            tensorflow = self.tensorflow
+        if session is None:
+            session = self.session
+
+        # Initialize adaptations
+        adapted_parameters = parameters
+        adapted_placeholders = placeholders
+        adapted_components = components
+
+        # Brain genes mutated
+        if self.parameters is not None:
+            adapted_parameters = dict(self.parameters)
+            adapted_parameters.update(parameters)
+        if self.placeholders is not None:
+            adapted_placeholders = dict(self.placeholders)
+            adapted_placeholders.update(placeholders)
+        if self.components is not None:
+            adapted_components = dict(self.components)
+            adapted_components.update(components)
+
+        # Return adapted brain
+        return self.__class__(adapted_parameters, None, adapted_placeholders, adapted_components, tensorflow, session)
 
 
 # An LSTM whose output is its last time step's output only
@@ -373,7 +406,9 @@ class PD_LSTM_Memory_Model(Brains):
         # Graph placeholders
         inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
         time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
+        # time_ahead = tf.placeholder("float", [None, None])
         self.placeholders = {"inputs": inputs, "time_dims": time_dims}
+        # , "time_ahead": time_ahead}
 
         # Mask for canceling out padding in dynamic sequences
         mask = tf.tile(tf.expand_dims(tf.sign(tf.reduce_max(tf.abs(self.placeholders["inputs"]), axis=2)), axis=2),
@@ -387,6 +422,10 @@ class PD_LSTM_Memory_Model(Brains):
         # Dropout
         if "dropout" in self.parameters:
             inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"][0])
+
+        # Add time ahead before lstm layer
+        # if self.parameters["time_ahead_upstream"]:
+        #     inputs = tf.concat([inputs, tf.expand_dims(time_ahead, 2)], 2)
 
         # Layers of LSTM cells
         if mode == "cudnn":

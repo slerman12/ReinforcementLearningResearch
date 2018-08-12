@@ -2,7 +2,8 @@ from __future__ import division
 import time
 import numpy as np
 import tensorflow as tf
-from tensorflow.python.framework import function  # For overriding norm gradient in Lifelong Memory Model
+from copy import deepcopy
+
 import Brains
 
 
@@ -74,19 +75,6 @@ class Agent:
     def see(self, state, batch_dims=1, time_dims=1):
         # Start timing
         start_time = time.time()
-        # print()
-        # print("YAAAAA")
-        # print(state["inputs"][-1].any(axis=1))
-        # print(state["inputs"])
-        # print(np.isnan(state["inputs"][-1]).any(axis=1))
-        # print(state["time_dims"][-1])
-        # print()
-        # print(np.isnan(state["time_dims"]).any())
-        # print()
-        # print(state["inputs"].shape[0])
-
-        # print(self.vision.brain.run({"inputs": np.ones(state["inputs"].shape), "time_dims": state["time_dims"]}))
-        # print(state["inputs"][-1][0])
 
         # Vision
         if self.vision is None:
@@ -109,11 +97,6 @@ class Agent:
 
         # Measure time
         self.timer = time.time() - start_time
-
-        # print(scene[-1].any(axis=1))
-        # print(scene.shape[0])
-        #
-        # print(scene[-1])
 
         # Return scene
         return scene
@@ -310,13 +293,18 @@ class Agent:
     def start_tensorflow(self):
         # Open scope, start brains (build graphs), and begin session
         with tf.name_scope(self.scope_name):
-            with tf.variable_scope("brain", reuse=None or self.scope_name != "training", initializer=None):
+            with tf.variable_scope("brain", reuse=None or self.scope_name != "training", initializer=None) as variable_scope:
                 # Start vision
                 if self.vision is not None:
                     self.vision.start_brain()
 
+                # Start memory
+                if self.long_term_memory is not None:
+                    self.long_term_memory.start_brain(variable_scope=variable_scope)
+
                 # Start brain
-                self.start_brain()
+                with tf.name_scope("agent_brain"):
+                    self.start_brain()
 
                 # Learning steps counter
                 self.learning_steps = tf.get_variable("learning_steps", [], tf.int32, tf.zeros_initializer(), False)
@@ -342,9 +330,50 @@ class Agent:
                 self.session.run(initialize_variables)
 
         # Assign session to brains
-        for brain in [self.brain, self.vision.brain]:
-            if brain is not None:
-                brain.session = self.session
+        for body in [self, self.vision, self.long_term_memory]:
+            if body is not None:
+                if body.brain is not None:
+                    body.brain.session = self.session
+
+    def adapt(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
+              actions=None, exploration_rate=None, k=None, tensorflow=None, scope_name="adapted", session=None):
+        # Bodies
+        bodies = [self.vision, self.long_term_memory, self.short_term_memory, self.traces]
+
+        # Genes
+        genes = [self.attributes, self.actions, self.exploration_rate, self.k, self.tensorflow, self.session]
+
+        # Mutations
+        body_mutations = [vision, long_term_memory, short_term_memory, traces]
+        gene_mutations = [attributes, actions, exploration_rate, k, tensorflow, session]
+
+        # Default bodies
+        for i, mutation in enumerate(body_mutations):
+            if mutation is None and bodies[i] is not None:
+                body_mutations[i] = bodies[i].adapt()
+
+        # Default genes
+        for i, mutation in enumerate(gene_mutations):
+            if mutation is None:
+                gene_mutations[i] = genes[i]
+
+        # Return adapted agent
+        return self.__class__(body_mutations[0], body_mutations[1], body_mutations[2], body_mutations[3],
+                              gene_mutations[0], gene_mutations[1], gene_mutations[2], gene_mutations[3],
+                              gene_mutations[4], scope_name, gene_mutations[5])
+
+        # if exploration_rate is None:
+        #     exploration_rate = self.exploration_rate
+        # if k is None:
+        #     k = self.k
+        # if tensorflow is None:
+        #     tensorflow = self.tensorflow
+        # if session is None:
+        #     session = self.session
+        #
+        # # Return adapted agent
+        # return self.__class__(mutations[0], mutations[1], mutations[2], mutations[3], mutations[4], mutations[5],
+        #                       exploration_rate, k, tensorflow, scope_name, session)
 
     def save(self, filename="Saved/brain"):
         # Save to file
@@ -764,7 +793,7 @@ class LifelongMemory(Agent):
         # Desired outputs
         desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
 
-        # Time ahead
+        # # Time ahead
         time_ahead = tf.placeholder("float", [None, None])
 
         # Retrieved memories
@@ -797,6 +826,14 @@ class LifelongMemory(Agent):
         # To prevent division by 0 and to prevent NaN gradients from square root of 0
         distance_delta = 0.001
 
+        # Memory embedding
+        # output_weights = tf.get_variable("output_weights", [self.attributes["attributes"] + 1 if
+        #                                                     self.vision.brain.parameters["time_ahead_upstream"] else
+        #                                                     self.attributes["attributes"],
+        #                                                     self.attributes["attributes"]])
+        # output_bias = tf.get_variable("output_bias", [self.attributes["attributes"]])
+        # outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
+
         # Distances (batch x time x k)
         distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2),
                                                                         [1, 1, self.k, 1]), remember_concepts), axis=3)
@@ -814,23 +851,25 @@ class LifelongMemory(Agent):
 
         # Distance weighted memory attributes (batch x time x attributes)
         distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
-        outputs = distance_weighted_memory_attributes
+        # outputs = distance_weighted_memory_attributes
 
-        # # Add time ahead before final dense layer
-        # outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(time_ahead, 2)], 2) \
-        #     if self.vision.brain.parameters["time_ahead"] else distance_weighted_memory_attributes
-        #
-        # # Final dense layer weights
-        # output_weights = tf.get_variable("output_weights", [self.attributes["attributes"] + 1 if
-        #                                                     self.vision.brain.parameters["time_ahead"] else
-        #                                                     self.attributes["attributes"],
-        #                                                     self.attributes["attributes"]])
-        #
-        # # Final dense layer bias
-        # output_bias = tf.get_variable("output_bias", [self.attributes["attributes"]])
-        #
-        # # # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
-        # outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
+        # Add time ahead before final dense layer
+        outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(time_ahead, 2)], 2) \
+            if self.vision.brain.parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
+
+        outputs = tf.concat([outputs, placeholders["inputs"]], 2)
+
+        # Final dense layer weights
+        output_weights = tf.get_variable("output_weights", [self.vision.brain.parameters["input_dim"] + self.attributes["attributes"] + 1 if
+                                                            self.vision.brain.parameters["time_ahead_downstream"] else
+                                                            self.vision.brain.parameters["input_dim"] + self.attributes["attributes"],
+                                                            self.attributes["attributes"]])
+
+        # Final dense layer bias
+        output_bias = tf.get_variable("output_bias", [self.attributes["attributes"]])
+
+        # # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
+        outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
 
         # Set brain for agent
         self.brain = Brains.Brains(brain=outputs, parameters=self.vision.brain.parameters, placeholders=placeholders)
@@ -842,6 +881,11 @@ class LifelongMemory(Agent):
                 # Mean squared difference
                 mean_squared_difference = tf.reduce_mean(
                     tf.squared_difference(self.brain.brain, desired_outputs), axis=2)
+
+                # TODO double check
+                # Mean squared difference for memory module output
+                mean_squared_difference += tf.reduce_mean(
+                    tf.squared_difference(distance_weighted_memory_attributes, desired_outputs), axis=2)
 
                 # Mask for canceling out padding in dynamic sequences
                 mask = tf.sign(tf.reduce_max(tf.abs(desired_outputs), 2))

@@ -53,29 +53,29 @@ class ReadPD:
         # Shuffle patients
         random.Random(4).shuffle(patients)
 
-        # Split into training, validation, and evaluation data
+        # Split training sets
         self.training_memory_data_patients = patients[:round(self.train_test_split * len(patients))]
-        self.training_data_patients = self.training_memory_data_patients[
-                                      :round(self.train_memory_split * len(self.training_memory_data_patients))]
-        self.memory_data_patients = self.training_memory_data_patients[
-                                    round(self.train_memory_split * len(self.training_memory_data_patients)):]
+        self.train_memory_split_index = round(self.train_memory_split * len(self.training_memory_data_patients))
+        self.training_data_patients = self.training_memory_data_patients[:self.train_memory_split_index]
+        self.memory_data_patients = self.training_memory_data_patients[self.train_memory_split_index:]
+
+        # Split testing sets
         self.testing_data_patients = patients[round(self.train_test_split * len(patients)):]
-        self.validation_data_patients = self.testing_data_patients[:round(self.valid_eval_split *
-                                                                          len(self.testing_data_patients))]
-        self.evaluation_data_patients = self.testing_data_patients[round(self.valid_eval_split *
-                                                                         len(self.testing_data_patients)):]
+        self.valid_eval_split_index = round(self.valid_eval_split * len(self.testing_data_patients))
+        self.validation_data_patients = self.testing_data_patients[:self.valid_eval_split_index]
+        self.evaluation_data_patients = self.testing_data_patients[self.valid_eval_split_index:]
 
         # Assigns data sets
+        self.training_memory_data_file = file[file["PATNO"].isin(self.training_memory_data_patients)]
         self.training_data_file = file[file["PATNO"].isin(self.training_data_patients)]
         self.memory_data_file = file[file["PATNO"].isin(self.memory_data_patients)]
-        self.training_memory_data_file = file[file["PATNO"].isin(self.training_memory_data_patients)]
         self.validation_data_file = file[file["PATNO"].isin(self.validation_data_patients)]
         self.evaluation_data_file = file[file["PATNO"].isin(self.evaluation_data_patients)]
 
         # Create data
-        self.training_data = self.start(self.training_data_file, self.sequence_dropout)
-        self.memory_data = self.start(self.training_data_file, self.sequence_dropout)
         self.training_memory_data = self.start(self.training_memory_data_file)
+        self.training_data = self.start(self.training_data_file, self.sequence_dropout)
+        self.memory_data = self.start(self.memory_data_file, self.sequence_dropout)
         self.validation_data = self.start(self.validation_data_file)
         self.evaluation_data = self.start(self.evaluation_data_file)
 
@@ -180,7 +180,7 @@ class ReadPD:
         # Return pd data
         return pd_data
 
-    def read(self, data, batch_size=None, time_ahead=False, time_dims_separated=False):
+    def read(self, data, batch_size=None, time_ahead=True, time_dims_separated=False):
         # Shuffle testing data
         random.shuffle(data)
 
@@ -246,20 +246,18 @@ class ReadPD:
         random.Random(4).shuffle(self.training_memory_data_patients)
 
         # Split into training and memory data
-        self.training_data_patients = self.training_memory_data_patients[
-                                      :round(self.train_memory_split * len(self.training_memory_data_patients))]
-        self.memory_data_patients = self.training_memory_data_patients[
-                                    round(self.train_memory_split * len(self.training_memory_data_patients)):]
+        self.training_data_patients = self.training_memory_data_patients[:self.train_memory_split_index]
+        self.memory_data_patients = self.training_memory_data_patients[self.train_memory_split_index:]
 
         # Assigns data sets
+        self.training_data_file = self.training_memory_data_file[
+            self.training_memory_data_file["PATNO"].isin(self.training_data_patients)]
         self.memory_data_file = self.training_memory_data_file[
             self.training_memory_data_file["PATNO"].isin(self.memory_data_patients)]
-        self.training_memory_data_file = self.training_memory_data_file[
-            self.training_memory_data_file["PATNO"].isin(self.training_memory_data_patients)]
 
         # Create data
         self.training_data = self.start(self.training_data_file, self.sequence_dropout)
-        self.memory_data = self.start(self.training_data_file, self.sequence_dropout)
+        self.memory_data = self.start(self.memory_data_file, self.sequence_dropout)
 
         # Variable for iterating batches
         self.batch_begin = 0

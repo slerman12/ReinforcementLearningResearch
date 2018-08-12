@@ -65,6 +65,13 @@ class Vision:
         if self.train is not None:
             self.brain.run(placeholders, self.train)
 
+    def adapt(self, parameters=None, placeholders=None, components=None, session=None):
+        # Adapted brain
+        adapted_brain = self.brain.adapt(parameters, placeholders, components, session)
+
+        # Adapted vision
+        return self.__class__(self.size, self.greyscale, self.crop, self.params, adapted_brain, self.tensorflow)
+
 
 class Segmentation:
     def __init__(self, object_capacity, size=None, greyscale=False, crop=None, params=None, trajectory=True):

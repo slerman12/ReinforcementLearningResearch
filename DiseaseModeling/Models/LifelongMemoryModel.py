@@ -17,62 +17,41 @@ model_directory = "LifelongMemoryModel/no_final_dense_layer"
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
                      train_test_split=0.8, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0)
 
+# Validation data
+validation_data = reader.read(reader.validation_data)
+
+# Memories
+agent_memories = reader.read(reader.memory_data)
+validation_memories = reader.read(reader.training_memory_data)
+
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,
                         max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="block",
-                        max_gradient_clip_norm=5, time_ahead=True)
+                        max_gradient_clip_norm=5, time_ahead_downstream=True, time_ahead_upstream=True)
 
 # Attributes
 attributes = {"concepts": brain_parameters["output_dim"], "attributes": reader.desired_output_dim}
 
-# Validation parameters
-validation_parameters = brain_parameters.copy()
-validation_parameters["dropout"] = [0, 0, 0]
-validation_parameters["batch_dim"] = len(reader.validation_data)
+# Vision
+vision = Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters))
 
-# Validation data
-validation_data = reader.read(reader.validation_data, time_ahead=validation_parameters["time_ahead"])
+# Agent memory
+agent_memory = Memories.Memories(capacity=reader.separate_time_dims(agent_memories["inputs"]).shape[0],
+                                 attributes=attributes,
+                                 vision=vision.adapt({"dropout": [0, 0, 0],
+                                                      "batch_dim": agent_memories["inputs"].shape[0]}))
 
-# Memory data
-memory_data = reader.read(reader.memory_data)
-validation_memory_data = reader.read(reader.training_memory_data)
-
-# Memory representation parameters
-memory_representation_parameters = brain_parameters.copy()
-memory_representation_parameters["dropout"] = [0, 0, 0]
-memory_representation_parameters["batch_dim"] = memory_data["inputs"].shape[0]
-validation_memory_represent_parameters = memory_representation_parameters.copy()
-validation_memory_represent_parameters["batch_dim"] = len(reader.training_memory_data)
-
-# Memory
-agent_memory = Memories.Memories(capacity=reader.separate_time_dims(memory_data["inputs"]).shape[0],
-                                 attributes=attributes)
-validation_memory = Memories.Memories(capacity=reader.separate_time_dims(validation_memory_data["inputs"]).shape[0],
-                                      attributes=attributes)
-
-# TODO
-# memory = Memories.Memories(capacity, attributes, brain=vision.adapt(bla)) (vision just calls brain.adapt)
-# No memory_represent; initialize memory brain session in Agent
-# memories = memory.represent(memory_data)
+# Validation memory
+validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0],
+                                       vision=vision.adapt({"dropout": [0, 0, 0],
+                                                            "batch_dim": len(reader.training_memory_data)}))
 
 # Agent
-agent = Agent.LifelongMemory(vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters)),
-                             long_term_memory=agent_memory, attributes=attributes, k=10)
+agent = Agent.LifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes, k=10)
 
 # Validation
-validate = Agent.LifelongMemory(vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(validation_parameters)),
-                                long_term_memory=validation_memory, attributes=attributes, k=10, session=agent.session,
-                                scope_name="validating")
-
-# Memory representation
-memory_represent = Agent.Agent(
-    vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(memory_representation_parameters)),
-    session=agent.session, scope_name="memory_representation")
-
-# Validation memory representation
-validation_memory_represent = Agent.Agent(
-    vision=Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(validation_memory_represent_parameters)),
-    session=agent.session, scope_name="validation_memory_representation")
+validate = agent.adapt(vision=agent.vision.adapt({"dropout": [0, 0, 0], "batch_dim": len(reader.validation_data)}),
+                       long_term_memory=validation_memory, scope_name="validating")
 
 # Initialize metrics for measuring performance
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
@@ -80,9 +59,10 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       run_throughs_per_epoch=len(reader.training_data) // brain_parameters["batch_dim"],
                                       description=brain_parameters)
 
+print(agent.gradients)
+
 # TensorBoard
-agent.start_tensorboard(scalars={"Loss MSE": agent.loss},
-                        # gradients=agent.gradients, variables=agent.variables,
+agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
                         logging_interval=10, directory_name="Logs/{}".format(model_directory))
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
                            directory_name="Logs/{}".format(model_directory))
@@ -93,16 +73,13 @@ if __name__ == "__main__":
     if restore:
         agent.load("Saved/{}/brain".format(model_directory))
 
-    # Memory representations
-    memories = memory_represent.see(memory_data)
-    validation_memories = validation_memory_represent.see(validation_memory_data)
-
     # Populate memory with representations
-    agent_memory.reset(population={"concepts": reader.separate_time_dims(memories),
-                                   "attributes": reader.separate_time_dims(memory_data["desired_outputs"])})
-    validation_memory.reset(population={"concepts": reader.separate_time_dims(validation_memories),
-                                        "attributes": reader.separate_time_dims(
-                                            validation_memory_data["desired_outputs"])})
+    agent_memory.reset(
+        population={"concepts": reader.separate_time_dims(agent_memory.represent(agent_memories)),
+                    "attributes": reader.separate_time_dims(agent_memories["desired_outputs"])})
+    validation_memory.reset(
+        population={"concepts": reader.separate_time_dims(validation_memory.represent(validation_memories)),
+                    "attributes":  reader.separate_time_dims(validation_memories["desired_outputs"])})
 
     # Consolidate memories (build KD tree for them)
     agent_memory.consolidate()
@@ -124,12 +101,11 @@ if __name__ == "__main__":
 
         # Train
         loss = agent.learn({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
-                            "desired_outputs": desired_outputs, "time_ahead": time_ahead,
-                            "learning_rate": learning_rate})
-
-        # print(agent.vision.see({"inputs": np.ones(inputs.shape), "time_dims": time_dims}))
+                            "desired_outputs": desired_outputs, "learning_rate": learning_rate,
+                            "time_ahead": time_ahead})
 
         # Validation
+        validation_mse = "processing..."
         if performance.is_epoch(episode, interval=5):
             # See
             scene = validate.see(validation_data)
@@ -142,8 +118,6 @@ if __name__ == "__main__":
                                                     "remember_attributes": remember_attributes,
                                                     "desired_outputs": validation_data["desired_outputs"],
                                                     "time_ahead": validation_data["time_ahead"]})
-        else:
-            validation_mse = "processing..."
 
         # Measure performance
         performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Learning Rate": learning_rate,
@@ -162,19 +136,15 @@ if __name__ == "__main__":
             reader.shuffle_training_memory_split()
 
             # Read new memory data
-            memory_data = reader.read(reader.memory_data)
-
-            # Memory representations
-            memories = memory_represent.see(memory_data)
-            validation_memories = validation_memory_represent.see(validation_memory_data)
+            agent_memories = reader.read(reader.memory_data)
 
             # Populate memory with representations
-            agent_memory.reset(population={"concepts": reader.separate_time_dims(memories),
-                                           "attributes": reader.separate_time_dims(memory_data["desired_outputs"])})
-
-            validation_memory.reset(population={"concepts": reader.separate_time_dims(validation_memories),
-                                                "attributes": reader.separate_time_dims(
-                                                    validation_memory_data["desired_outputs"])})
+            agent_memory.reset(
+                population={"concepts": reader.separate_time_dims(agent_memory.represent(agent_memories)),
+                            "attributes": reader.separate_time_dims(agent_memories["desired_outputs"])})
+            validation_memory.reset(
+                population={"concepts": reader.separate_time_dims(validation_memory.represent(validation_memories)),
+                            "attributes":  reader.separate_time_dims(validation_memories["desired_outputs"])})
 
             # Consolidate memories (build KD tree for them)
             agent_memory.consolidate()

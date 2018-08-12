@@ -2,8 +2,11 @@ from __future__ import division
 import math
 import numpy as np
 # from pyflann.index import FLANN
+from copy import deepcopy
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neighbors.kd_tree import KDTree
+import Brains
+import tensorflow as tf
 
 
 class Traces:
@@ -110,7 +113,7 @@ class Traces:
 
 
 class Memories:
-    def __init__(self, capacity, attributes):
+    def __init__(self, capacity, attributes, vision=None, tensorflow=True):
         # Initialize memories
         self.memories = {}
 
@@ -138,6 +141,62 @@ class Memories:
 
         # Number of duplicates
         self.num_duplicates = 0
+
+        # Vision
+        self.vision = vision
+
+        # Brain
+        self.brain = None
+
+        # If using TensorFlow
+        self.tensorflow = tensorflow
+
+    def start_brain(self, name_scope="memory", variable_scope="brain"):
+        # if self.tensorflow:
+        #     with tf.name_scope(name_scope):
+        #         if self.vision is not None:
+        #             self.brain.components.update({"vision": self.vision})
+        # 
+        #         self.brain.build()
+        if self.tensorflow:
+            with tf.name_scope(name_scope):
+                # Placeholders and parameters
+                placeholders = {}
+                parameters = {"output_dim": self.attributes["concepts"]}
+
+                # Embedding 
+                embed = None
+                embed_weights = None
+                embed_bias = None
+
+                # If vision
+                if self.vision is not None:
+                    # Start vision
+                    with tf.variable_scope(variable_scope, reuse=True):
+                        self.vision.start_brain()
+
+                    # Placeholders
+                    placeholders.update(self.vision.brain.placeholders)
+
+                    # Embedding weights and bias
+                    # embed_weights = tf.get_variable("embed_weights", [self.vision.brain.parameters["output_dim"],
+                    #                                                   parameters["output_dim"]])
+                    # embed_bias = tf.get_variable("embed_bias", [parameters["output_dim"]])
+
+                    # Embedding
+                    # embed = tf.einsum('aij,jk->aik', self.vision.brain.brain, embed_weights) + embed_bias
+                    embed = self.vision.brain.brain
+
+                # Components
+                # components = {"embed_weights": embed_weights, "embed_bias": embed_bias, "embeds": embed}
+
+                # Brain
+                self.brain = Brains.Brains(brain=embed, placeholders=placeholders)
+                                           # , components=components)
+
+    def represent(self, placeholders=None, partial_run_setup=None):
+        # Get memory representation
+        return self.brain.run(placeholders, partial_run_setup=partial_run_setup)
 
     def store(self, memory, check_duplicate=False):
         # If memory capacity has not been reached
@@ -224,6 +283,30 @@ class Memories:
 
         # Modified
         self.modified = True
+
+    def adapt(self, capacity=None, attributes=None, vision=None, tensorflow=None):
+        # Bodies
+        bodies = [self.vision]
+
+        # Genes
+        genes = [self.capacity, self.attributes, self.tensorflow]
+
+        # Mutations
+        body_mutations = [vision]
+        gene_mutations = [capacity, attributes, tensorflow]
+
+        # Default bodies
+        for i, mutation in enumerate(body_mutations):
+            if mutation is None and bodies[i] is not None:
+                body_mutations[i] = bodies[i].adapt()
+
+        # Default genes
+        for i, mutation in enumerate(gene_mutations):
+            if mutation is None:
+                gene_mutations[i] = genes[i]
+
+        # Return adapted agent
+        return self.__class__(gene_mutations[0], gene_mutations[1], body_mutations[0], gene_mutations[2])
 
 
 class MFEC(Memories):
