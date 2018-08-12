@@ -10,11 +10,12 @@ import numpy as np
 restore = False
 
 # Model directory
-model_directory = "LSTMModel/time_ahead_and_sequence_dropout"
+path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
+model_directory = "LSTMModelShuffleRegularize/time_ahead_no_dropout_interval_5"
 
 # Data reader
-reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"], train_test_split=0.7,
-                     valid_eval_split=1, sequence_dropout=0)
+reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
+                     train_test_split=0.75, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
@@ -43,15 +44,15 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
 
 # TensorBoard
 agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
-                        logging_interval=100, directory_name="Models/Logs/{}".format(model_directory))
+                        logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-                           directory_name="Models/Logs/{}".format(model_directory))
+                           directory_name="{}/Logs/{}".format(path, model_directory))
 
 # Main method
 if __name__ == "__main__":
     # Load agent
     if restore:
-        agent.load("Models/Saved/{}/brain".format(model_directory))
+        agent.load("{}/Saved/{}".format(path, model_directory))
 
     # Training iterations
     for episode in range(1, 100000000000 + 1):
@@ -77,5 +78,9 @@ if __name__ == "__main__":
                                                                                  "Validation (MSE)": lambda x: x[-1]})
 
         # Save agent
-        if performance.is_epoch(episode):
-            agent.save("Models/Saved/{}/brain".format(model_directory))
+        if performance.is_epoch(episode, interval=5):
+            # Save agent
+            agent.save("{}/Saved/{}".format(path, model_directory))
+
+            # Shuffle training/memory split
+            reader.shuffle_training_memory_split()

@@ -71,7 +71,7 @@ validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboar
 if __name__ == "__main__":
     # Load agent
     if restore:
-        agent.load("Saved/{}/brain".format(model_directory))
+        agent.load("Saved/{}".format(model_directory))
 
     # Populate memory with representations
     agent_memory.reset(
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         # End of epoch
         if performance.is_epoch(episode, interval=5):
             # Save agent
-            agent.save("Saved/{}/brain".format(model_directory))
+            agent.save("Saved/{}".format(model_directory))
 
             # Shuffle training/memory split
             reader.shuffle_training_memory_split()
