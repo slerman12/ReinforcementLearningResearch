@@ -911,20 +911,25 @@ class LifelongMemory(Agent):
                 mean_squared_difference = tf.reduce_mean(
                     tf.squared_difference(self.brain.brain, desired_outputs), axis=2)
 
-                # Mean squared difference for memory module output
-                mean_squared_difference += tf.reduce_mean(
+                # Mean squared difference of output added to that of memory module output
+                cost = mean_squared_difference + tf.reduce_mean(
                     tf.squared_difference(distance_weighted_memory_attributes, desired_outputs), axis=2)
 
                 # Mask for canceling out padding in dynamic sequences
                 mask = tf.sign(tf.reduce_max(tf.abs(desired_outputs), 2))
 
                 # Explicit masking of loss (necessary in case a bias was added to the padding!)
-                mean_squared_difference *= mask
+                cost *= mask
 
-                # Average loss over each (padded) sequence and batch
-                self.loss = tf.reduce_mean(tf.reduce_sum(mean_squared_difference, 1) / tf.reduce_sum(mask, 1))
+                # Cost function to optimize
+                cost = tf.reduce_mean(tf.reduce_sum(cost, 1) / tf.reduce_sum(mask, 1))
+
+                # Average loss over each (padded) sequence and batch for just final output
+                self.loss = tf.reduce_mean(tf.reduce_sum(mean_squared_difference, 1) / tf.reduce_sum(mask, 1)) * mask
+                self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
+
             else:
-                # Mean squared error
+                # Mean squared error TODO add memory output
                 self.loss = tf.losses.mean_squared_error(desired_outputs, self.brain.brain)
 
             # If training
@@ -942,13 +947,13 @@ class LifelongMemory(Agent):
                     self.variables = tf.trainable_variables()
 
                     # Get gradients of loss and clip them according to max gradient clip norm
-                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(cost, self.variables),
                                                                self.brain.parameters["max_gradient_clip_norm"])
 
                     # Training
                     train = optimizer.apply_gradients(zip(self.gradients, self.variables))
                 else:
-                    # Training
+                    # Training TODO add memory output
                     train = optimizer.minimize(self.loss)
 
                 # Dummy train operation for partial run
