@@ -18,6 +18,7 @@ class Performance:
         self.run_throughs_per_epoch = run_throughs_per_epoch
         self.epochs = 0
         self.print_output = print_output
+        self.interval = 1
         self.time_training_began = time.time()
 
         # Empty metrics variable
@@ -41,7 +42,8 @@ class Performance:
         else:
             # Set progress parameters
             self.progress.show = self.print_output
-            self.progress.progress_total = self.run_throughs_per_epoch
+            self.progress.name = "Epoch" if self.interval == 1 else "Epochs"
+            self.progress.progress_total = self.run_throughs_per_epoch * self.interval
 
             # Reset progress if needed
             if self.progress.progress_complete == self.progress.progress_total:
@@ -57,13 +59,16 @@ class Performance:
         if self.progress is not None:
             self.progress.update_progress()
 
-    def output_performance(self, run_through, description=None, aggregation=mean, special_aggregation=None):
+    def output_performance(self, run_through, description=None, aggregation=mean, interval=1, special_aggregation=None):
         # Default no special aggregation
         if special_aggregation is None:
             special_aggregation = {}
 
+        # Interval
+        self.interval = interval
+
         # End epoch
-        if run_through % self.run_throughs_per_epoch == 0 or run_through == 1:
+        if (run_through / interval) % self.run_throughs_per_epoch == 0 or run_through == 1:
             # Print performance
             if self.print_output:
                 # Print description and epoch

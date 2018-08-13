@@ -8,7 +8,7 @@ from DiseaseModeling.Data import Data
 import numpy as np
 
 # Restore saved agent
-restore = False
+restore = True
 
 # Model directory
 model_directory = "LifelongMemoryModel/no_final_dense_layer"
@@ -55,8 +55,6 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       run_throughs_per_epoch=len(reader.training_data) // brain_parameters["batch_dim"],
                                       description=brain_parameters)
 
-print(agent.gradients)
-
 # TensorBoard
 agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
                         logging_interval=10, directory_name="Logs/{}".format(model_directory))
@@ -99,7 +97,7 @@ if __name__ == "__main__":
 
         # Validation
         validation_mse = "processing..."
-        if performance.is_epoch(episode, interval=5):
+        if performance.is_epoch(episode, interval=10):
             # Remember
             remember_concepts, remember_attributes = validate.remember({"inputs": validation_data["inputs"],
                                                                         "time_dims": validation_data["time_dims"]})
@@ -115,11 +113,12 @@ if __name__ == "__main__":
                                          "RMSE": np.sqrt(loss), "Loss (MSE)": loss, "Validation (MSE)": validation_mse})
 
         # Display performance
-        performance.output_performance(run_through=episode, special_aggregation={"Episode": lambda x: x[-1],
-                                                                                 "Validation (MSE)": lambda x: x[-1]})
+        performance.output_performance(run_through=episode, interval=10,
+                                       special_aggregation={"Episode": lambda x: x[-1],
+                                                            "Validation (MSE)": lambda x: x[-1]})
 
         # End of epoch
-        if performance.is_epoch(episode, interval=5):
+        if performance.is_epoch(episode, interval=10):
             # Save agent
             agent.save("Saved/{}".format(model_directory))
 

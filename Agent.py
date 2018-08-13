@@ -886,7 +886,7 @@ class LifelongMemory(Agent):
             if parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
 
         # Concatenate context vector
-        outputs = tf.concat([outputs, placeholders["inputs"]], 2)
+        outputs = tf.concat([outputs, self.vision.brain.placeholders["inputs"]], 2)
 
         # Update midstream dim
         parameters["downstream_dim"] = outputs.shape[2]
