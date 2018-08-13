@@ -394,19 +394,6 @@ class Agent:
                               gene_mutations[0], gene_mutations[1], gene_mutations[2], gene_mutations[3],
                               gene_mutations[4], scope_name, gene_mutations[5])
 
-        # if exploration_rate is None:
-        #     exploration_rate = self.exploration_rate
-        # if k is None:
-        #     k = self.k
-        # if tensorflow is None:
-        #     tensorflow = self.tensorflow
-        # if session is None:
-        #     session = self.session
-        #
-        # # Return adapted agent
-        # return self.__class__(mutations[0], mutations[1], mutations[2], mutations[3], mutations[4], mutations[5],
-        #                       exploration_rate, k, tensorflow, scope_name, session)
-
     def save(self, filename="Saved/brain"):
         # Save to file
         self.tensorflow_saver.save(self.session, filename)
@@ -825,13 +812,10 @@ class LifelongMemory(Agent):
         # Parameters (Careful, not deepcopy)
         parameters = {}
         parameters.update(self.vision.brain.parameters)
-        parameters.update({"input_dim": parameters["output_dim"], "output_dim": self.attributes["attributes"]})
+        parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
 
         # Desired outputs
         desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
-
-        # Time ahead
-        time_ahead = tf.placeholder("float", [None, None])
 
         # Retrieved memories
         remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
@@ -840,8 +824,8 @@ class LifelongMemory(Agent):
         # Placeholders (Careful, not deepcopy)
         placeholders = {}
         placeholders.update(self.vision.brain.placeholders)
-        placeholders.update({"desired_outputs": desired_outputs, "time_ahead": time_ahead,
-                             "remember_concepts": remember_concepts, "remember_attributes": remember_attributes})
+        placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+                             "desired_outputs": desired_outputs})
 
         # Components (Careful, not deepcopy)
         components = {}
@@ -882,7 +866,7 @@ class LifelongMemory(Agent):
         distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
 
         # Add time ahead before final dense layer
-        outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(time_ahead, 2)], 2) \
+        outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(placeholders["time_ahead"], 2)], 2) \
             if parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
 
         # Concatenate context vector

@@ -429,6 +429,9 @@ class PD_LSTM_Memory_Model(Brains):
         self.components = {"mask": tf.expand_dims(tf.sign(tf.reduce_max(tf.abs(self.placeholders["inputs"]), axis=2)),
                                                   axis=2)}
 
+        # Parameters
+        self.parameters.update({"midstream_dim": self.parameters["output_dim"]})
+
         # Default cell mode ("basic", "block", "cudnn") and number of layers
         num_layers = self.parameters["num_layers"] if "num_layers" in self.parameters else 1
 
@@ -453,10 +456,10 @@ class PD_LSTM_Memory_Model(Brains):
         if "time_ahead_midstream" in self.parameters:
             if self.parameters["time_ahead_midstream"]:
                 outputs = tf.concat([outputs, tf.expand_dims(time_ahead, 2)], 2)
-                self.parameters["output_dim"] += 1
+                self.parameters.update({"midstream_dim": self.parameters["midstream_dim"] + 1})
 
         # Give mask the right dimensionality
-        mask = tf.tile(self.components["mask"], [1, 1, self.parameters["output_dim"]])
+        mask = tf.tile(self.components["mask"], [1, 1, self.parameters["midstream_dim"]])
 
         # Mask for canceling out padding in dynamic sequences
         outputs *= mask
