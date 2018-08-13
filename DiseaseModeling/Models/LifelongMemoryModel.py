@@ -27,7 +27,8 @@ validation_memories = reader.read(reader.training_memory_data)
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,
                         max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="block",
-                        max_gradient_clip_norm=5, time_ahead_downstream=True, time_ahead_upstream=True)
+                        max_gradient_clip_norm=5, time_ahead_downstream=False, time_ahead_midstream=False,
+                        time_ahead_upstream=False, memory_embedding_dim=128)
 
 # Attributes
 attributes = {"concepts": brain_parameters["output_dim"], "attributes": reader.desired_output_dim}
@@ -37,21 +38,16 @@ vision = Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters))
 
 # Agent memory
 agent_memory = Memories.Memories(capacity=reader.separate_time_dims(agent_memories["inputs"]).shape[0],
-                                 attributes=attributes,
-                                 vision=vision.adapt({"dropout": [0, 0, 0],
-                                                      "batch_dim": agent_memories["inputs"].shape[0]}))
+                                 attributes=attributes, vision=vision.adapt({"dropout": [0, 0, 0]}))
 
 # Validation memory
-validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0],
-                                       vision=vision.adapt({"dropout": [0, 0, 0],
-                                                            "batch_dim": len(reader.training_memory_data)}))
+validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0])
 
 # Agent
 agent = Agent.LifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes, k=10)
 
 # Validation
-validate = agent.adapt(vision=agent.vision.adapt({"dropout": [0, 0, 0], "batch_dim": len(reader.validation_data)}),
-                       long_term_memory=validation_memory, scope_name="validating")
+validate = agent.adapt(vision=agent_memory.vision.adapt(), long_term_memory=validation_memory, scope_name="validating")
 
 # Initialize metrics for measuring performance
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
@@ -93,11 +89,8 @@ if __name__ == "__main__":
         # Batch
         inputs, desired_outputs, time_dims, time_ahead = reader.iterate_batch(brain_parameters["batch_dim"])
 
-        # See
-        scene = agent.see({"inputs": inputs, "time_dims": time_dims})
-
         # Remember
-        remember_concepts, remember_attributes = agent.remember(scene, time_dims=time_dims)
+        remember_concepts, remember_attributes = agent.remember({"inputs": inputs, "time_dims": time_dims})
 
         # Train
         loss = agent.learn({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
@@ -107,11 +100,9 @@ if __name__ == "__main__":
         # Validation
         validation_mse = "processing..."
         if performance.is_epoch(episode, interval=5):
-            # See
-            scene = validate.see(validation_data)
-
             # Remember
-            remember_concepts, remember_attributes = validate.remember(scene, time_dims=validation_data["time_dims"])
+            remember_concepts, remember_attributes = validate.remember({"inputs": validation_data["inputs"],
+                                                                        "time_dims": validation_data["time_dims"]})
 
             # Validate
             validation_mse = validate.measure_loss({"remember_concepts": remember_concepts,

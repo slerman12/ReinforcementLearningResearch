@@ -15,15 +15,15 @@ model_directory = "LSTMModelShuffleRegularize/time_ahead_no_dropout_interval_5"
 
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
-                     train_test_split=0.75, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0)
+                     train_test_split=0.8, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
                         max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="fused",
-                        max_gradient_clip_norm=5, time_ahead=True)
+                        max_gradient_clip_norm=5, time_ahead_upstream=False, time_ahead_downstream=True)
 
 # Validation data
-validation_data = reader.read(reader.validation_data, time_ahead=brain_parameters["time_ahead"])
+validation_data = reader.read(reader.validation_data)
 
 # Validation parameters
 validation_parameters = brain_parameters.copy()

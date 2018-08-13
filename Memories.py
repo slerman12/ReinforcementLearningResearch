@@ -160,14 +160,15 @@ class Memories:
         #         self.brain.build()
         if self.tensorflow:
             with tf.name_scope(name_scope):
-                # Placeholders and parameters
+                # Parameters, placeholders, and components
+                parameters = {}
                 placeholders = {}
-                parameters = {"output_dim": self.attributes["concepts"]}
+                components = {}
 
-                # Embedding 
-                embed = None
-                embed_weights = None
-                embed_bias = None
+                # Embedding
+                embedding_weights = None
+                embedding_bias = None
+                memory_embedding = None
 
                 # If vision
                 if self.vision is not None:
@@ -175,24 +176,36 @@ class Memories:
                     with tf.variable_scope(variable_scope, reuse=True):
                         self.vision.start_brain()
 
-                    # Placeholders
+                    # Parameters, placeholders, and components (Careful, not deepcopy)
+                    parameters.update(self.vision.brain.parameters)
                     placeholders.update(self.vision.brain.placeholders)
+                    components.update(self.vision.brain.components)
+
+                    # Parameters
+                    parameters.update({"input_dim": parameters["output_dim"],
+                                       "output_dim": parameters["memory_embedding_dim"]})
 
                     # Embedding weights and bias
-                    # embed_weights = tf.get_variable("embed_weights", [self.vision.brain.parameters["output_dim"],
-                    #                                                   parameters["output_dim"]])
-                    # embed_bias = tf.get_variable("embed_bias", [parameters["output_dim"]])
+                    embedding_weights = tf.get_variable("memory_embedding_weights",
+                                                        [parameters["input_dim"], parameters["memory_embedding_dim"]])
+                    embedding_bias = tf.get_variable("memory_embedding_bias", [parameters["memory_embedding_dim"]])
 
-                    # Embedding
-                    # embed = tf.einsum('aij,jk->aik', self.vision.brain.brain, embed_weights) + embed_bias
-                    embed = self.vision.brain.brain
+                    # Embedding for memory
+                    memory_embedding = tf.einsum('aij,jk->aik', self.vision.brain.brain, embedding_weights)
+                    memory_embedding += embedding_bias
+
+                    # Give mask the right dimensionality
+                    mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+                    # Mask for canceling out padding in dynamic sequences
+                    memory_embedding *= mask
 
                 # Components
-                # components = {"embed_weights": embed_weights, "embed_bias": embed_bias, "embeds": embed}
+                components.update({"embedding_weights": embedding_weights, "embedding_bias": embedding_bias,
+                                   "memory_embedding": memory_embedding})
 
                 # Brain
-                self.brain = Brains.Brains(brain=embed, placeholders=placeholders)
-                                           # , components=components)
+                self.brain = Brains.Brains(brain=memory_embedding, placeholders=placeholders, components=components)
 
     def represent(self, placeholders=None, partial_run_setup=None):
         # Get memory representation
@@ -278,6 +291,8 @@ class Memories:
                 shape = population[attribute].shape
                 assert shape[1] == dimensionality if dimensionality > 1 else len(shape) == 1
                 self.memories[attribute] = population[attribute]
+                if not (self.length == shape[0] or self.length == 0):
+                    print(self.length, shape[0], attribute, dimensionality)
                 assert self.length == shape[0] or self.length == 0
                 self.length = shape[0]
 

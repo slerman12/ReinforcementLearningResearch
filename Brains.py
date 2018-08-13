@@ -27,6 +27,10 @@ class Brains:
         if placeholders is None:
             placeholders = {}
 
+        # For singular component not in list
+        if components is not None and not isinstance(components, list):
+            components = [components]
+
         # Run inputs through brain
         if self.tensorflow:
             # If regular running, just call session.run on the parameters
@@ -41,6 +45,13 @@ class Brains:
                                                                                          components
                 feeds = [partial_run_setup[1][key] for key in partial_run_setup[1]]
                 partial_run = self.session.partial_run_setup(fetches, feeds)
+
+                placeholders = {key: placeholders[key] for key in placeholders if key in partial_run_setup[1]}
+
+            # Output single value rather than list
+            if components is not None:
+                if len(components) == 1:
+                    components = components[0]
 
             # Return the result of the partial run and the partial graph
             return self.session.partial_run(partial_run, self.brain if components is None else components,
@@ -305,6 +316,11 @@ class PD_LSTM_Model(Brains):
         if "dropout" in self.parameters:
             inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"][0])
 
+        # Add time ahead before lstm layer
+        if "time_ahead_upstream" in self.parameters:
+            if self.parameters["time_ahead_upstream"]:
+                inputs = tf.concat([inputs, tf.expand_dims(time_ahead, 2)], 2)
+
         # Layers of LSTM cells
         if mode == "cudnn":
             # Transpose inputs to time_dim x batch_dim x input_dim
@@ -379,14 +395,14 @@ class PD_LSTM_Model(Brains):
             outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, initial_state)
 
         # Add time ahead before final dense layer
-        if self.parameters["time_ahead"]:
-            outputs = tf.concat([outputs, tf.expand_dims(time_ahead, 2)], 2)
+        hidden_dim = self.parameters["hidden_dim"]
+        if "time_ahead_downstream" in self.parameters:
+            if self.parameters["time_ahead_downstream"]:
+                outputs = tf.concat([outputs, tf.expand_dims(time_ahead, 2)], 2)
+                hidden_dim = self.parameters["hidden_dim"] + 1
 
         # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [self.parameters["hidden_dim"] + 1 if
-                                                            self.parameters["time_ahead"] else
-                                                            self.parameters["hidden_dim"],
-                                                            self.parameters["output_dim"]])
+        output_weights = tf.get_variable("output_weights", [hidden_dim, self.parameters["output_dim"]])
 
         # Final dense layer bias
         output_bias = tf.get_variable("output_bias", [self.parameters["output_dim"]])
@@ -406,17 +422,14 @@ class PD_LSTM_Memory_Model(Brains):
         # Graph placeholders
         inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
         time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
-        # time_ahead = tf.placeholder("float", [None, None])
-        self.placeholders = {"inputs": inputs, "time_dims": time_dims}
-        # , "time_ahead": time_ahead}
+        time_ahead = tf.placeholder("float", [None, None])
+        self.placeholders = {"inputs": inputs, "time_dims": time_dims, "time_ahead": time_ahead}
 
         # Mask for canceling out padding in dynamic sequences
-        mask = tf.tile(tf.expand_dims(tf.sign(tf.reduce_max(tf.abs(self.placeholders["inputs"]), axis=2)), axis=2),
-                       [1, 1, self.parameters["output_dim"]])
-        self.components = {"mask": mask}
+        self.components = {"mask": tf.expand_dims(tf.sign(tf.reduce_max(tf.abs(self.placeholders["inputs"]), axis=2)),
+                                                  axis=2)}
 
         # Default cell mode ("basic", "block", "cudnn") and number of layers
-        mode = self.parameters["mode"] if "mode" in self.parameters else "block"
         num_layers = self.parameters["num_layers"] if "num_layers" in self.parameters else 1
 
         # Dropout
@@ -424,84 +437,29 @@ class PD_LSTM_Memory_Model(Brains):
             inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"][0])
 
         # Add time ahead before lstm layer
-        # if self.parameters["time_ahead_upstream"]:
-        #     inputs = tf.concat([inputs, tf.expand_dims(time_ahead, 2)], 2)
+        if "time_ahead_upstream" in self.parameters:
+            if self.parameters["time_ahead_upstream"]:
+                inputs = tf.concat([inputs, tf.expand_dims(time_ahead, 2)], 2)
 
-        # Layers of LSTM cells
-        if mode == "cudnn":
-            # Transpose inputs to time_dim x batch_dim x input_dim
-            inputs = tf.transpose(inputs, [1, 0, 2])
+        # Dropout
+        lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(
+            tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"], forget_bias=5), output_keep_prob=
+            1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2]) for layer in range(num_layers)])
 
-            # Layers of lstm cells
-            lstm_layers = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers=num_layers, num_units=self.parameters["output_dim"],
-                                                         dropout=self.parameters["dropout"][1])
+        # Outputs and states of lstm layers
+        outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, dtype=tf.float32)
 
-            # Initial state
-            initial_state = (tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["output_dim"]], tf.float32),
-                             tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["output_dim"]], tf.float32))
-            # self.placeholders["initial_state"] = initial_state
+        # Add time ahead before lstm layer
+        if "time_ahead_midstream" in self.parameters:
+            if self.parameters["time_ahead_midstream"]:
+                outputs = tf.concat([outputs, tf.expand_dims(time_ahead, 2)], 2)
+                self.parameters["output_dim"] += 1
 
-            # Outputs and states of lstm layers
-            outputs, final_states = lstm_layers(inputs, initial_state)
-
-            # Transpose outputs into batch_dim x time_dim x output_dim
-            outputs = tf.transpose(outputs, [1, 0, 2])
-
-            # Dropout
-            if "dropout" in self.parameters:
-                outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"][2])
-        elif mode == "fused":
-            # Transpose inputs to time_dim x batch_dim x input_dim
-            inputs = tf.transpose(inputs, [1, 0, 2])
-
-            # Initialize layers, states, and outputs
-            layers = []
-            initial_states = [(tf.zeros([self.parameters["batch_dim"], self.parameters["output_dim"]], tf.float32),
-                               tf.zeros([self.parameters["batch_dim"], self.parameters["output_dim"]], tf.float32))
-                              for _ in range(num_layers)]
-            outputs = inputs
-            final_states = []
-
-            # Feed one layer into the next
-            for layer in range(num_layers):
-                layers.append(tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["output_dim"]))
-                outputs, final_state = layers[-1](outputs, initial_states[layer], tf.float32, time_dims)
-                final_states.append(final_state)
-
-                # Dropout
-                if "dropout" in self.parameters:
-                    outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"][1 if layer + 1 <
-                                                                                                   num_layers else 2])
-
-            # Transpose outputs into batch_dim x time_dim x output_dim
-            outputs = tf.transpose(outputs, [1, 0, 2])
-        else:
-            # Dropout
-            if "dropout" in self.parameters:
-                lstm_layers = tf.contrib.rnn.MultiRNNCell(
-                    [tf.contrib.rnn.DropoutWrapper(
-                        tf.contrib.rnn.BasicLSTMCell(self.parameters["output_dim"]) if mode == "basic"
-                        else tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"], forget_bias=5),
-                        output_keep_prob=1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2])
-                        for layer in range(num_layers)])
-            else:
-                # Layers of lstm cells
-                lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(self.parameters["output_dim"])
-                                                           if mode == "basic" else
-                                                           tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"])
-                                                           for _ in range(num_layers)])
-
-            # Initial state
-            initial_state = lstm_layers.zero_state(self.parameters["batch_dim"], tf.float32)
-            # self.placeholders["initial_state"] = initial_state
-
-            # Outputs and states of lstm layers
-            outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, initial_state)
+        # Give mask the right dimensionality
+        mask = tf.tile(self.components["mask"], [1, 1, self.parameters["output_dim"]])
 
         # Mask for canceling out padding in dynamic sequences
-        outputs *= self.components["mask"]
+        outputs *= mask
 
         # Components
         self.components.update({"outputs": outputs, "final_state": final_states})

@@ -19,6 +19,9 @@ class Agent:
         # Visual model
         self.vision = vision
 
+        # Representation for memory
+        self.memory_embedding = None
+
         # Memories
         self.long_term_memory = long_term_memory
         self.short_term_memory = short_term_memory
@@ -101,15 +104,42 @@ class Agent:
         # Return scene
         return scene
 
-    def remember(self, concept, batch_dims=None, max_time_dim=None, time_dims=None):
+    def remember(self, query, memory_embedding=None, memory=None, batch_dims=None, max_time_dim=None, time_dims=None):
         # Start timing
         start_time = time.time()
 
+        # Representation for memory
+        if memory_embedding is None:
+            memory_embedding = self.memory_embedding
+
+        # Memory
+        if memory is None:
+            memory = self.long_term_memory
+
+        # If TensorFlow and a representation for memory can be made
+        if self.tensorflow and memory_embedding is not None:
+            # If no partial run already active
+            if self.tensorflow_partial_run is None:
+                # Setup a partial run such that the graph is not recomputed later
+                partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] if fetch is
+                                       not None]
+                partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) else None
+
+                # Get embedding for memory
+                if partial_run_setup is None:
+                    query = self.brain.run(query, memory_embedding)
+                else:
+                    query, self.tensorflow_partial_run = self.brain.run(query, memory_embedding,
+                                                                        partial_run_setup=partial_run_setup)
+            else:
+                # Get representation using active partial run
+                query, _ = self.brain.run(query, memory_embedding, self.tensorflow_partial_run)
+
         # Initialize batch dims
-        batch_dims = concept.shape[0] if batch_dims is None else batch_dims
+        batch_dims = query.shape[0] if batch_dims is None else batch_dims
 
         # Initialize max time dim
-        max_time_dim = concept.shape[1] if max_time_dim is None else max_time_dim
+        max_time_dim = query.shape[1] if max_time_dim is None else max_time_dim
 
         # Initialize time dims
         time_dims = np.full(batch_dims, max_time_dim) if time_dims is None else time_dims
@@ -122,27 +152,22 @@ class Agent:
         duplicate = []
 
         # Memory Module
-        if self.long_term_memory is not None:
+        if memory is not None:
             # For each batch
             for batch_dim in range(batch_dims):
                 # For each time
                 for time_dim in range(time_dims[batch_dim]):
                     # Number of similar memories
-                    num_similar_memories = min(self.long_term_memory.length, self.k)
+                    num_similar_memories = min(memory.length, self.k)
 
                     # If there are memories to draw from
                     if num_similar_memories > 0:
-                        # Query to memory
-                        query = concept[batch_dim, time_dim]
-
                         # If not all zero
-                        if query.any():
+                        if query[batch_dim, time_dim].any():
                             # Similar memories TODO check if duplicate with distance == 0 TODO account for <k memory
-                            distances, indices = self.long_term_memory.retrieve(query, self.k)
-                            remember_concepts[batch_dim, time_dim] = \
-                                self.long_term_memory.memories["concepts"][indices]
-                            remember_attributes[batch_dim, time_dim] = \
-                                self.long_term_memory.memories["attributes"][indices]
+                            distances, indices = memory.retrieve(query[batch_dim, time_dim], self.k)
+                            remember_concepts[batch_dim, time_dim] = memory.memories["concepts"][indices]
+                            remember_attributes[batch_dim, time_dim] = memory.memories["attributes"][indices]
 
         # Measure time
         self.timer = time.time() - start_time
@@ -249,6 +274,9 @@ class Agent:
                 # Output TensorBoard data
                 self.tensorboard_writer.add_summary(logs, learning_steps)
 
+        # Reset partial run
+        self.tensorflow_partial_run = None
+
         # Measure time
         self.timer = time.time() - start_time
 
@@ -277,6 +305,9 @@ class Agent:
             # Output TensorBoard data
             self.tensorboard_writer.add_summary(logs, learning_steps)
 
+        # Reset partial run
+        self.tensorflow_partial_run = None
+
         # Measure time
         self.timer = time.time() - start_time
 
@@ -293,7 +324,8 @@ class Agent:
     def start_tensorflow(self):
         # Open scope, start brains (build graphs), and begin session
         with tf.name_scope(self.scope_name):
-            with tf.variable_scope("brain", reuse=None or self.scope_name != "training", initializer=None) as variable_scope:
+            with tf.variable_scope("brain", reuse=None or self.scope_name != "training",
+                                   initializer=None) as variable_scope:
                 # Start vision
                 if self.vision is not None:
                     self.vision.start_brain()
@@ -790,52 +822,49 @@ class Regressor(Agent):
 
 class LifelongMemory(Agent):
     def start_brain(self):
+        # Parameters (Careful, not deepcopy)
+        parameters = {}
+        parameters.update(self.vision.brain.parameters)
+        parameters.update({"input_dim": parameters["output_dim"], "output_dim": self.attributes["attributes"]})
+
         # Desired outputs
         desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
 
-        # # Time ahead
+        # Time ahead
         time_ahead = tf.placeholder("float", [None, None])
 
         # Retrieved memories
         remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
         remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
 
-        # Placeholders (Note: this would probably modify the placeholders of vision as well if I didn't copy)
-        placeholders = self.vision.brain.placeholders.copy()
-        placeholders["desired_outputs"] = desired_outputs
-        placeholders["time_ahead"] = time_ahead
-        placeholders["remember_concepts"] = remember_concepts
-        placeholders["remember_attributes"] = remember_attributes
+        # Placeholders (Careful, not deepcopy)
+        placeholders = {}
+        placeholders.update(self.vision.brain.placeholders)
+        placeholders.update({"desired_outputs": desired_outputs, "time_ahead": time_ahead,
+                             "remember_concepts": remember_concepts, "remember_attributes": remember_attributes})
 
-        # Distances (batch x time x k)
-        # distances = tf.norm(remember_concepts - tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2),
-        #                                                 [1, 1, self.k, 1]), axis=3)
-        # TensorFlow norm passes weird gradients! (https://github.com/tensorflow/tensorflow/issues/12071)
-        # Temporarily using L2 distance squared; might as well use normalized cosine similarity.
-        # Note: my k-NN is using L2.
-        # distances = tf.reduce_sum(tf.squared_difference(remember_concepts,
-        #                                                 tf.tile(tf.expand_dims(self.vision.brain.brain,
-        #                                                                        axis=2), [1, 1, self.k, 1])), axis=3)
-        # Distances (batch x time x k) accounting for nan gradients for square root of 0
-        # distances = tf.sqrt(tf.clip_by_value(tf.reduce_sum(
-        #     tf.squared_difference(tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2), [1, 1, self.k, 1]),
-        #                           remember_concepts), axis=3), 1e-12, 1e12))  # Check andrej blog about clip by value
-        # Weights (batch x time x k x attributes)
-        # weights = tf.tile(tf.expand_dims(1.0 / (distances + 0.001), axis=3), [1, 1, 1, self.attributes["attributes"]])
+        # Components (Careful, not deepcopy)
+        components = {}
+        components.update(self.vision.brain.components)
+        components.update({"vision": self.vision.brain.brain,
+                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
+                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
+
+        # Embedding for memory
+        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
+        self.memory_embedding += components["memory_embedding_bias"]
+
+        # Give mask the right dimensionality
+        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+        # Mask for canceling out padding in dynamic sequences
+        self.memory_embedding *= mask
 
         # To prevent division by 0 and to prevent NaN gradients from square root of 0
         distance_delta = 0.001
 
-        # Memory embedding
-        # output_weights = tf.get_variable("output_weights", [self.attributes["attributes"] + 1 if
-        #                                                     self.vision.brain.parameters["time_ahead_upstream"] else
-        #                                                     self.attributes["attributes"],
-        #                                                     self.attributes["attributes"]])
-        # output_bias = tf.get_variable("output_bias", [self.attributes["attributes"]])
-        # outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
-
         # Distances (batch x time x k)
-        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.vision.brain.brain, axis=2),
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
                                                                         [1, 1, self.k, 1]), remember_concepts), axis=3)
                             + distance_delta ** 2)
 
@@ -851,38 +880,37 @@ class LifelongMemory(Agent):
 
         # Distance weighted memory attributes (batch x time x attributes)
         distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
-        # outputs = distance_weighted_memory_attributes
 
         # Add time ahead before final dense layer
         outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(time_ahead, 2)], 2) \
-            if self.vision.brain.parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
+            if parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
 
+        # Concatenate context vector
         outputs = tf.concat([outputs, placeholders["inputs"]], 2)
 
+        # Update midstream dim
+        parameters["downstream_dim"] = outputs.shape[2]
+
         # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [self.vision.brain.parameters["input_dim"] + self.attributes["attributes"] + 1 if
-                                                            self.vision.brain.parameters["time_ahead_downstream"] else
-                                                            self.vision.brain.parameters["input_dim"] + self.attributes["attributes"],
-                                                            self.attributes["attributes"]])
+        output_weights = tf.get_variable("output_weights", [parameters["downstream_dim"], parameters["output_dim"]])
 
         # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.attributes["attributes"]])
+        output_bias = tf.get_variable("output_bias", [parameters["output_dim"]])
 
-        # # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
+        # Dense layer
         outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
 
         # Set brain for agent
-        self.brain = Brains.Brains(brain=outputs, parameters=self.vision.brain.parameters, placeholders=placeholders)
+        self.brain = Brains.Brains(brain=outputs, parameters=parameters, placeholders=placeholders)
 
         # If not just representing memories, compute the loss
         if self.scope_name != "memory_representation":
             # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
             if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
-                # Mean squared difference
+                # Mean squared difference for brain output
                 mean_squared_difference = tf.reduce_mean(
                     tf.squared_difference(self.brain.brain, desired_outputs), axis=2)
 
-                # TODO double check
                 # Mean squared difference for memory module output
                 mean_squared_difference += tf.reduce_mean(
                     tf.squared_difference(distance_weighted_memory_attributes, desired_outputs), axis=2)
