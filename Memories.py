@@ -113,7 +113,7 @@ class Traces:
 
 
 class Memories:
-    def __init__(self, capacity, attributes, brain=None, vision=None, tensorflow=True):
+    def __init__(self, capacity, attributes, vision=None, tensorflow=True):
         # Initialize memories
         self.memories = {}
 
@@ -146,7 +146,7 @@ class Memories:
         self.vision = vision
 
         # Brain
-        self.brain = brain
+        self.brain = None
 
         # If using TensorFlow
         self.tensorflow = tensorflow
@@ -299,15 +299,15 @@ class Memories:
         # Modified
         self.modified = True
 
-    def adapt(self, capacity=None, attributes=None, brain=None, vision=None, tensorflow=None):
+    def adapt(self, capacity=None, attributes=None, vision=None, tensorflow=None):
         # Bodies
-        bodies = [self.brain, self.vision]
+        bodies = [self.vision]
 
         # Genes
         genes = [self.capacity, self.attributes, self.tensorflow]
 
         # Mutations
-        body_mutations = [brain, vision]
+        body_mutations = [vision]
         gene_mutations = [capacity, attributes, tensorflow]
 
         # Default bodies
@@ -321,8 +321,8 @@ class Memories:
                 gene_mutations[i] = genes[i]
 
         # Return adapted agent
-        return self.__class__(capacity=gene_mutations[0], attributes=gene_mutations[1], brain=body_mutations[0],
-                              vision=body_mutations[1], tensorflow=gene_mutations[2])
+        return self.__class__(capacity=gene_mutations[0], attributes=gene_mutations[1], vision=body_mutations[0],
+                              tensorflow=gene_mutations[2])
 
 
 class MFEC(Memories):

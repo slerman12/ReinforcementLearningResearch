@@ -12,7 +12,7 @@ restore = False
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LifelongMemoryModel/no_final_dense_layer"
+model_directory = "LifelongMemoryModel/test"
 
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
@@ -27,12 +27,13 @@ validation_memories = reader.read(reader.training_memory_data)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, output_dim=128,
-                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="block",
+                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.5], mode="block",
                         max_gradient_clip_norm=5, time_ahead_downstream=False, time_ahead_midstream=True,
-                        time_ahead_upstream=False, memory_embedding_dim=128)
+                        time_ahead_upstream=False, memory_embedding_dim=64, raw_input_context_vector=False,
+                        visual_representation_context_vector=True)
 
 # Attributes
-attributes = {"concepts": brain_parameters["output_dim"], "attributes": reader.desired_output_dim}
+attributes = {"concepts": brain_parameters["memory_embedding_dim"], "attributes": reader.desired_output_dim}
 
 # Vision
 vision = Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters))
@@ -105,7 +106,7 @@ if __name__ == "__main__":
                                                                         "time_ahead": validation_data["time_ahead"]})
 
             # Validate
-            validation_mse = validate.measure_loss({"remember_concepts": remember_concepts,
+            validation_mse = validate.measure_errors({"remember_concepts": remember_concepts,
                                                     "remember_attributes": remember_attributes,
                                                     "desired_outputs": validation_data["desired_outputs"]})
 

@@ -10,7 +10,8 @@ import numpy as np
 restore = False
 
 # Model directory
-model_directory = "LSTMModel/time_ahead_and_sequence_dropout"
+path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
+model_directory = "LSTMModel/time_ahead_midstream"
 
 # Data reader
 reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"], train_test_split=0.7,
@@ -19,10 +20,10 @@ reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
                         max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="fused",
-                        max_gradient_clip_norm=5, time_ahead=True)
+                        max_gradient_clip_norm=5, time_ahead_midstream=True)
 
 # Validation data
-validation_data = reader.read(reader.validation_data, time_ahead=brain_parameters["time_ahead"])
+validation_data = reader.read(reader.validation_data)
 
 # Validation parameters
 validation_parameters = brain_parameters.copy()
@@ -43,15 +44,15 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
 
 # TensorBoard
 agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
-                        logging_interval=100, directory_name="Models/Logs/{}".format(model_directory))
+                        logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-                           directory_name="Models/Logs/{}".format(model_directory))
+                           directory_name="{}/Logs/{}".format(path, model_directory))
 
 # Main method
 if __name__ == "__main__":
     # Load agent
     if restore:
-        agent.load("Models/Saved/{}/brain".format(model_directory))
+        agent.load("{}/Saved/{}".format(path,model_directory))
 
     # Training iterations
     for episode in range(1, 100000000000 + 1):
@@ -66,7 +67,7 @@ if __name__ == "__main__":
                             "learning_rate": learning_rate, "time_ahead": time_ahead})
 
         # Validate
-        validation_mse = validate.measure_loss(validation_data) if performance.is_epoch(episode) else None
+        validation_mse = validate.measure_errors(validation_data) if performance.is_epoch(episode) else None
 
         # Measure performance
         performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Learning Rate": learning_rate,
@@ -78,4 +79,4 @@ if __name__ == "__main__":
 
         # Save agent
         if performance.is_epoch(episode):
-            agent.save("Models/Saved/{}/brain".format(model_directory))
+            agent.save("{}/Saved/{}".format(path, model_directory))

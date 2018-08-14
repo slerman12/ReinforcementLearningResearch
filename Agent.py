@@ -38,9 +38,10 @@ class Agent:
         self.k = k
 
         # Brain defaults
-        self.brain = self.loss = self.train = self.accuracy = self.learning_steps = self.increment_learning_steps = \
-            self.gradients = self.variables = self.tensorflow_partial_run = self.tensorflow_saver = \
-            self.tensorboard_logging_interval = self.tensorboard_writer = self.tensorboard_logs = None
+        self.brain = self.loss = self.errors = self.train = self.accuracy = \
+            self.learning_steps = self.increment_learning_steps = self.gradients = self.variables = \
+            self.tensorflow_partial_run = self.tensorflow_saver = self.tensorboard_logging_interval = \
+            self.tensorboard_writer = self.tensorboard_logs = None
 
         # If using TensorFlow
         self.tensorflow = tensorflow
@@ -85,8 +86,9 @@ class Agent:
             scene = state
         elif self.tensorflow:
             # Setup a partial run such that the graph is not recomputed later
-            partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] if fetch is
-                                   not None]
+            error_fetches = self.errors if isinstance(self.errors, list) else [self.errors]
+            partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] + error_fetches
+                                   if fetch is not None]
             partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) > 0 else None
 
             # See
@@ -121,8 +123,9 @@ class Agent:
             # If no partial run already active
             if self.tensorflow_partial_run is None:
                 # Setup a partial run such that the graph is not recomputed later
-                partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] if fetch is
-                                       not None]
+                error_fetches = self.errors if isinstance(self.errors, list) else [self.errors]
+                partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] + error_fetches
+                                       if fetch is not None]
                 partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) else None
 
                 # Get embedding for memory
@@ -248,31 +251,40 @@ class Agent:
         # Defaults
         if placeholders is None:
             placeholders = {}
-        loss = None
+        errors = None
 
         # Consolidate memories
         if self.long_term_memory is not None:
             self.long_term_memory.consolidate(self.short_term_memory)
 
-        # Train brain TODO make this and measure loss prettier
+        # Train brain
         if self.train is not None and self.tensorflow:
             # Increment learning steps
             learning_steps = self.brain.run(components=[self.increment_learning_steps])[0]
 
-            if self.tensorboard_logs is None or learning_steps % self.tensorboard_logging_interval:
-                if self.tensorflow_partial_run is None:
-                    _, loss = self.brain.run(placeholders, [self.train, self.loss])
-                else:
-                    (_, loss), _ = self.brain.run(placeholders, [self.train, self.loss], self.tensorflow_partial_run)
-            else:
-                if self.tensorflow_partial_run is None:
-                    _, loss, logs = self.brain.run(placeholders, [self.train, self.loss, self.tensorboard_logs])
-                else:
-                    (_, loss, logs), _ = self.brain.run(placeholders, [self.train, self.loss, self.tensorboard_logs],
-                                                        self.tensorflow_partial_run)
+            # Fetches
+            fetches = {"train": self.train}
 
-                # Output TensorBoard data
-                self.tensorboard_writer.add_summary(logs, learning_steps)
+            # Errors and logs
+            if self.errors is None:
+                fetches.update({"errors": self.loss})
+            else:
+                fetches.update({"errors": self.errors})
+            if self.tensorboard_logs is not None and learning_steps % self.tensorboard_logging_interval == 0:
+                fetches.update({"logs": self.tensorboard_logs})
+
+            # Fetched
+            if self.tensorflow_partial_run is None:
+                fetched = self.brain.run(placeholders, fetches, self.tensorflow_partial_run)
+            else:
+                fetched, _ = self.brain.run(placeholders, fetches, self.tensorflow_partial_run)
+
+            # Errors
+            errors = fetched["errors"]
+
+            # Output TensorBoard logs
+            if self.tensorboard_logs is not None and learning_steps % self.tensorboard_logging_interval == 0:
+                self.tensorboard_writer.add_summary(fetched["logs"], learning_steps)
 
         # Reset partial run
         self.tensorflow_partial_run = None
@@ -281,29 +293,35 @@ class Agent:
         self.timer = time.time() - start_time
 
         # Return loss
-        return loss
+        return errors
 
-    def measure_loss(self, data):
+    def measure_errors(self, data):
         # Start timing
         start_time = time.time()
 
         # Learning steps
         learning_steps = self.brain.run(components=[self.learning_steps])[0]
 
-        # Get loss
-        if self.tensorboard_logs is None or learning_steps % self.tensorboard_logging_interval:
-            if self.tensorflow_partial_run is None:
-                loss = self.brain.run(data, self.loss)
-            else:
-                loss, _ = self.brain.run(data, self.loss, partial_run=self.tensorflow_partial_run)
-        else:
-            if self.tensorflow_partial_run is None:
-                loss, logs = self.brain.run(data, [self.loss, self.tensorboard_logs])
-            else:
-                (loss, logs), _ = self.brain.run(data, [self.loss, self.tensorboard_logs], self.tensorflow_partial_run)
+        # Fetches
+        fetches = {}
 
-            # Output TensorBoard data
-            self.tensorboard_writer.add_summary(logs, learning_steps)
+        # Errors and logs
+        if self.errors is None:
+            fetches.update({"errors": self.loss})
+        else:
+            fetches.update({"errors": self.errors})
+        if self.tensorboard_logs is not None and learning_steps % self.tensorboard_logging_interval == 0:
+            fetches.update({"logs": self.tensorboard_logs})
+
+        # Fetched
+        if self.tensorflow_partial_run is None:
+            fetched = self.brain.run(data, fetches, self.tensorflow_partial_run)
+        else:
+            fetched, _ = self.brain.run(data, fetches, self.tensorflow_partial_run)
+
+        # Output TensorBoard logs
+        if self.tensorboard_logs is not None and learning_steps % self.tensorboard_logging_interval == 0:
+            self.tensorboard_writer.add_summary(fetched["logs"], learning_steps)
 
         # Reset partial run
         self.tensorflow_partial_run = None
@@ -312,7 +330,7 @@ class Agent:
         self.timer = time.time() - start_time
 
         # Return loss and logs
-        return loss
+        return fetched["errors"]
 
     def move_time_forward(self):
         # Size of discrete time unit
@@ -869,8 +887,13 @@ class LifelongMemory(Agent):
         outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(placeholders["time_ahead"], 2)], 2) \
             if parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
 
-        # Concatenate context vector
-        outputs = tf.concat([outputs, self.vision.brain.placeholders["inputs"]], 2)
+        # Context vector
+        if "raw_input_context_vector" in parameters:
+            if parameters["raw_input_context_vector"]:
+                outputs = tf.concat([outputs, placeholders["inputs"]], 2)
+        if "visual_representation_context_vector" in parameters:
+            if parameters["visual_representation_context_vector"]:
+                outputs = tf.concat([outputs, components["vision"]], 2)
 
         # Update midstream dim
         parameters["downstream_dim"] = outputs.shape[2]
@@ -896,25 +919,25 @@ class LifelongMemory(Agent):
                     tf.squared_difference(self.brain.brain, desired_outputs), axis=2)
 
                 # Mean squared difference of output added to that of memory module output
-                cost = mean_squared_difference + tf.reduce_mean(
+                self.loss = mean_squared_difference + tf.reduce_mean(
                     tf.squared_difference(distance_weighted_memory_attributes, desired_outputs), axis=2)
 
                 # Mask for canceling out padding in dynamic sequences
                 mask = tf.sign(tf.reduce_max(tf.abs(desired_outputs), 2))
 
                 # Explicit masking of loss (necessary in case a bias was added to the padding!)
-                cost *= mask
+                self.loss *= mask
 
-                # Cost function to optimize
-                cost = tf.reduce_mean(tf.reduce_sum(cost, 1) / tf.reduce_sum(mask, 1))
-
-                # Average loss over each (padded) sequence and batch for just final output
-                self.loss = tf.reduce_mean(tf.reduce_sum(mean_squared_difference, 1) / tf.reduce_sum(mask, 1)) * mask
+                # Loss function to optimize
                 self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
 
-            else:
-                # Mean squared error TODO add memory output
-                self.loss = tf.losses.mean_squared_error(desired_outputs, self.brain.brain)
+                # Average loss over each (padded) sequence and batch for just final output
+                self.errors = tf.reduce_mean(tf.reduce_sum(mean_squared_difference, 1) / tf.reduce_sum(mask, 1)) * mask
+                self.errors = tf.reduce_mean(tf.reduce_sum(self.errors, 1) / tf.reduce_sum(mask, 1))
+
+            # else:
+            #     # Mean squared error TODO add memory output
+            #     self.loss = tf.losses.mean_squared_error(desired_outputs, self.brain.brain)
 
             # If training
             if self.scope_name == "training":
@@ -931,7 +954,7 @@ class LifelongMemory(Agent):
                     self.variables = tf.trainable_variables()
 
                     # Get gradients of loss and clip them according to max gradient clip norm
-                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(cost, self.variables),
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
                                                                self.brain.parameters["max_gradient_clip_norm"])
 
                     # Training

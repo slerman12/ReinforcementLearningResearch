@@ -11,7 +11,7 @@ restore = False
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LSTMModelShuffleRegularize/time_ahead_no_dropout_interval_5"
+model_directory = "LSTMModelShuffleRegularize/time_ahead_midstream_interval_5"
 
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
@@ -20,7 +20,7 @@ reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
                         max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="fused",
-                        max_gradient_clip_norm=5, time_ahead_upstream=False, time_ahead_downstream=True)
+                        max_gradient_clip_norm=5, time_ahead_upstream=False, time_ahead_midstream=True)
 
 # Validation data
 validation_data = reader.read(reader.validation_data)
@@ -67,7 +67,7 @@ if __name__ == "__main__":
                             "learning_rate": learning_rate, "time_ahead": time_ahead})
 
         # Validate
-        validation_mse = validate.measure_loss(validation_data) if performance.is_epoch(episode) else None
+        validation_mse = validate.measure_errors(validation_data) if performance.is_epoch(episode) else None
 
         # Measure performance
         performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Learning Rate": learning_rate,
