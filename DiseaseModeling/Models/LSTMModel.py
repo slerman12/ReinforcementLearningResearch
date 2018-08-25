@@ -14,8 +14,8 @@ path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseMo
 model_directory = "LSTMModel/time_ahead_downstream_with_dropout_0.2_0_0.65"
 
 # Data reader
-reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"], train_test_split=0.8,
-                     valid_eval_split=1, sequence_dropout=0)
+reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"],
+                     train_test_split=0.8, valid_eval_split=1, sequence_dropout=0)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
@@ -43,10 +43,10 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       run_throughs_per_epoch=len(reader.training_data) // brain_parameters["batch_dim"])
 
 # TensorBoard
-agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
-                        logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
-validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-                           directory_name="{}/Logs/{}".format(path, model_directory))
+# agent.start_tensorboard(scalars={"Loss MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
+#                         logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
+# validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
+#                            directory_name="{}/Logs/{}".format(path, model_directory))
 
 # Main method
 if __name__ == "__main__":

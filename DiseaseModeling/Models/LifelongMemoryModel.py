@@ -6,7 +6,7 @@ import Memories
 import Brains
 from DiseaseModeling.Data import Data
 import numpy as np
-import time
+
 # Restore saved agent
 restore = False
 
@@ -64,10 +64,10 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       description=brain_parameters)
 
 # TensorBoard
-agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
-                        logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
-validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-                           logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
+# agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
+#                         logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
+# validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
+#                            logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
 
 # Main method
 if __name__ == "__main__":

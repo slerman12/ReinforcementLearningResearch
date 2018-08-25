@@ -768,10 +768,12 @@ class Regressor(Agent):
         # Start timing
         start_time = time.time()
 
-        # Default brain
-        if self.brain is None:
-            if self.vision is not None:
-                self.brain = self.vision.brain
+        # STart vision
+        self.vision.start_brain()
+
+        # Set brain for agent
+        self.brain = Brains.Brains(brain=self.vision.brain.brain, parameters=self.vision.brain.parameters,
+                                   placeholders=self.vision.brain.placeholders)
 
         # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
         if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
@@ -964,24 +966,23 @@ class LifelongMemory(Agent):
             if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
                 # Mask for canceling out padding in dynamic sequences
                 mask = tf.squeeze(components["mask"])
+                mask_normalizer = tf.reduce_sum(mask, 1)
 
                 # Mean squared difference for brain output
                 final_prediction_loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+                final_prediction_loss *= mask
+                final_prediction_loss = tf.reduce_mean(tf.reduce_sum(final_prediction_loss, 1) / mask_normalizer)
+
+                # Mean squared difference for memory module output
                 memory_prediction_loss = tf.reduce_mean(tf.squared_difference(distance_weighted_memory_attributes,
-                                                                              desired_outputs), axis=2)
-
-                # Mean squared difference of output (option to add to memory prediction loss)
-                self.loss = final_prediction_loss
-
-                # Explicit masking of loss (necessary in case a bias was added to the padding)
-                self.loss *= mask
+                                                                              desired_outputs), axis=2) * mask
+                memory_prediction_loss = tf.reduce_mean(tf.reduce_sum(memory_prediction_loss, 1) / mask_normalizer)
 
                 # Loss function to optimize
-                self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
+                self.loss = final_prediction_loss
 
-                # Error(s) to record
-                self.errors = [tf.reduce_mean(tf.reduce_sum(final_prediction_loss * mask, 1) / tf.reduce_sum(mask, 1)),
-                               tf.reduce_mean(tf.reduce_sum(memory_prediction_loss * mask, 1) / tf.reduce_sum(mask, 1))]
+                # Error(s) to record (Note: TensorFlow leaks memory if these elements aren't predefined above)
+                self.errors = [final_prediction_loss, memory_prediction_loss]
 
             # else:
             #     # Mean squared error TODO add memory output

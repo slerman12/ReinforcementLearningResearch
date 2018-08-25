@@ -215,6 +215,8 @@ class Memories:
     def retrieve(self, scene, k):
         # Retrieve k most similar memories #
         dist, ind = self.tree.query([scene], k=min(k, self.length))
+        # dist = [np.ones(k), 0]
+        # ind = [np.ones(k, dtype=np.int32), 0]
         # ind, dist = self.tree.nn_index(experience.reshape(1, experience.shape[0]), min(k, self.length))
 
         # Return memories
