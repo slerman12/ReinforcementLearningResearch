@@ -113,7 +113,7 @@ class Traces:
 
 
 class Memories:
-    def __init__(self, capacity, attributes, vision=None, tensorflow=True):
+    def __init__(self, capacity, attributes, tensorflow=True):
         # Initialize memories
         self.memories = {}
 
@@ -142,22 +142,13 @@ class Memories:
         # Number of duplicates
         self.num_duplicates = 0
 
-        # Vision
-        self.vision = vision
-
         # Brain
         self.brain = None
 
         # If using TensorFlow
         self.tensorflow = tensorflow
 
-    def start_brain(self, name_scope="memory", variable_scope="brain"):
-        # if self.tensorflow:
-        #     with tf.name_scope(name_scope):
-        #         if self.vision is not None:
-        #             self.brain.components.update({"vision": self.vision})
-        # 
-        #         self.brain.build()
+    def start_brain(self, projection, name_scope="memory"):
         if self.tensorflow:
             with tf.name_scope(name_scope):
                 # Parameters, placeholders, and components
@@ -165,40 +156,32 @@ class Memories:
                 placeholders = {}
                 components = {}
 
-                # Embedding
-                embedding_weights = None
-                embedding_bias = None
-                memory_embedding = None
+                # TODO allow projection to be None and pass in raw parameters (either here or through brains)
 
-                # If vision
-                if self.vision is not None:
-                    # Start vision
-                    with tf.variable_scope(variable_scope, reuse=True):
-                        self.vision.start_brain()
+                # Parameters TODO change midstream dim to output dim in brains
+                parameters.update({"input_dim": projection.parameters["midstream_dim"],
+                                   "output_dim": projection.parameters["memory_embedding_dim"]})
 
-                    # Parameters, placeholders, and components (Careful, not deepcopy)
-                    parameters.update(self.vision.brain.parameters)
-                    placeholders.update(self.vision.brain.placeholders)
-                    components.update(self.vision.brain.components)
+                # Placeholders
+                placeholders.update(projection.placeholders)
 
-                    # Parameters
-                    parameters.update({"input_dim": parameters["midstream_dim"],
-                                       "output_dim": parameters["memory_embedding_dim"]})
+                # Components
+                components.update({"inputs": projection.brain, "mask": projection.components["mask"]})
 
-                    # Embedding weights and bias
-                    embedding_weights = tf.get_variable("memory_embedding_weights",
-                                                        [parameters["input_dim"], parameters["memory_embedding_dim"]])
-                    embedding_bias = tf.get_variable("memory_embedding_bias", [parameters["memory_embedding_dim"]])
+                # Embedding weights and bias
+                embedding_weights = tf.get_variable("memory_embedding_weights",
+                                                    [parameters["input_dim"], parameters["output_dim"]])
+                embedding_bias = tf.get_variable("memory_embedding_bias", [parameters["output_dim"]])
 
-                    # Embedding for memory
-                    memory_embedding = tf.einsum('aij,jk->aik', self.vision.brain.brain, embedding_weights)
-                    memory_embedding += embedding_bias
+                # Embedding for memory
+                memory_embedding = tf.einsum('aij,jk->aik', components["inputs"], embedding_weights)
+                memory_embedding += embedding_bias
 
-                    # Give mask the right dimensionality
-                    mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+                # Give mask the right dimensionality
+                mask = tf.tile(components["mask"], [1, 1, parameters["output_dim"]])
 
-                    # Mask for canceling out padding in dynamic sequences
-                    memory_embedding *= mask
+                # Mask for canceling out padding in dynamic sequences
+                memory_embedding *= mask
 
                 # Components
                 components.update({"embedding_weights": embedding_weights, "embedding_bias": embedding_bias,
@@ -299,15 +282,15 @@ class Memories:
         # Modified
         self.modified = True
 
-    def adapt(self, capacity=None, attributes=None, vision=None, tensorflow=None):
+    def adapt(self, capacity=None, attributes=None, tensorflow=None):
         # Bodies
-        bodies = [self.vision]
+        bodies = []
 
         # Genes
         genes = [self.capacity, self.attributes, self.tensorflow]
 
         # Mutations
-        body_mutations = [vision]
+        body_mutations = []
         gene_mutations = [capacity, attributes, tensorflow]
 
         # Default bodies
@@ -321,8 +304,7 @@ class Memories:
                 gene_mutations[i] = genes[i]
 
         # Return adapted agent
-        return self.__class__(capacity=gene_mutations[0], attributes=gene_mutations[1], vision=body_mutations[0],
-                              tensorflow=gene_mutations[2])
+        return self.__class__(capacity=gene_mutations[0], attributes=gene_mutations[1], tensorflow=gene_mutations[2])
 
 
 class MFEC(Memories):

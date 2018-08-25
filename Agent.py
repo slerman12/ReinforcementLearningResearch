@@ -19,9 +19,6 @@ class Agent:
         # Visual model
         self.vision = vision
 
-        # Representation for memory
-        self.memory_embedding = None
-
         # Memories
         self.long_term_memory = long_term_memory
         self.short_term_memory = short_term_memory
@@ -85,7 +82,7 @@ class Agent:
             # See
             scene = state
         elif self.tensorflow:
-            # Setup a partial run such that the graph is not recomputed later
+            # Setup a partial run such that the graph is not recomputed later TODO arbitrary projections
             error_fetches = self.errors if isinstance(self.errors, list) else [self.errors]
             partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] + error_fetches
                                    if fetch is not None]
@@ -112,7 +109,9 @@ class Agent:
 
         # Representation for memory
         if memory_embedding is None:
-            memory_embedding = self.memory_embedding
+            if self.long_term_memory is not None:
+                if self.long_term_memory.brain.brain is not None:
+                    memory_embedding = self.long_term_memory.brain.brain
 
         # Memory
         if memory is None:
@@ -122,7 +121,7 @@ class Agent:
         if self.tensorflow and memory_embedding is not None:
             # If no partial run already active
             if self.tensorflow_partial_run is None:
-                # Setup a partial run such that the graph is not recomputed later
+                # Setup a partial run such that the graph is not recomputed later TODO arbitrary projections
                 error_fetches = self.errors if isinstance(self.errors, list) else [self.errors]
                 partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] + error_fetches
                                        if fetch is not None]
@@ -346,19 +345,9 @@ class Agent:
     def start_tensorflow(self):
         # Open scope, start brains (build graphs), and begin session
         with tf.name_scope(self.scope_name):
-            with tf.variable_scope("brain", reuse=None or self.scope_name != "training",
-                                   initializer=None) as variable_scope:
-                # Start vision
-                if self.vision is not None:
-                    self.vision.start_brain()
-
-                # Start memory
-                if self.long_term_memory is not None:
-                    self.long_term_memory.start_brain(variable_scope=variable_scope)
-
+            with tf.variable_scope("brain", reuse=None or self.scope_name != "training", initializer=None):
                 # Start brain
-                with tf.name_scope("agent_brain"):
-                    self.start_brain()
+                self.start_brain()
 
                 # Learning steps counter
                 self.learning_steps = tf.get_variable("learning_steps", [], tf.int32, tf.zeros_initializer(), False)
@@ -831,8 +820,18 @@ class Regressor(Agent):
 
 class LifelongMemory(Agent):
     def start_brain(self):
-        # Parameters (Careful, not deepcopy)
+        # Start vision
+        self.vision.start_brain()
+
+        # Start long term memory
+        self.long_term_memory.start_brain(projection=self.vision.brain)
+
+        # Parameters, placeholders, and components
         parameters = {}
+        placeholders = {}
+        components = {}
+
+        # Parameters
         parameters.update(self.vision.brain.parameters)
         parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
 
@@ -843,34 +842,21 @@ class LifelongMemory(Agent):
         remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
         remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
 
-        # Placeholders (Careful, not deepcopy)
-        placeholders = {}
+        # Placeholders
         placeholders.update(self.vision.brain.placeholders)
         placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
                              "desired_outputs": desired_outputs})
 
-        # Components (Careful, not deepcopy)
-        components = {}
+        # Components
         components.update(self.vision.brain.components)
         components.update({"vision": self.vision.brain.brain,
-                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
-                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
-
-        # Embedding for memory
-        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
-        self.memory_embedding += components["memory_embedding_bias"]
-
-        # Give mask the right dimensionality
-        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
-
-        # Mask for canceling out padding in dynamic sequences
-        self.memory_embedding *= mask
+                           "memory": self.long_term_memory.brain.brain})
 
         # To prevent division by 0 and to prevent NaN gradients from square root of 0
         distance_delta = 0.001
 
         # Distances (batch x time x k)
-        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(components["memory"], axis=2),
                                                                         [1, 1, self.k, 1]), remember_concepts), axis=3)
                             + distance_delta ** 2)
 
@@ -887,6 +873,7 @@ class LifelongMemory(Agent):
         # Distance weighted memory attributes (batch x time x attributes)
         distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
 
+        # Default outputs (memory module's distance-weighted predictions)
         outputs = distance_weighted_memory_attributes
 
         if "downstream_weights" in parameters:
@@ -953,6 +940,7 @@ class LifelongMemory(Agent):
                 # Dense layer
                 outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
 
+                # Dropout
                 tf.nn.dropout(outputs, keep_prob=0.65)
 
                 # Final dense layer weights
@@ -964,6 +952,7 @@ class LifelongMemory(Agent):
                 # Dense layer
                 outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
 
+        # Apply mask to outputs
         outputs *= tf.tile(components["mask"], [1, 1, parameters["output_dim"]])
 
         # Set brain for agent
@@ -973,19 +962,16 @@ class LifelongMemory(Agent):
         if self.scope_name != "memory_representation":
             # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
             if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+                # Mask for canceling out padding in dynamic sequences
+                mask = tf.squeeze(components["mask"])
+
                 # Mean squared difference for brain output
                 final_prediction_loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
                 memory_prediction_loss = tf.reduce_mean(tf.squared_difference(distance_weighted_memory_attributes,
                                                                               desired_outputs), axis=2)
 
-                # Mean squared difference of output added to that of memory module output
-                # self.loss = mean_squared_difference
-                # print("no memory specific loss")
-                # self.loss = 5 * final_prediction_loss + memory_prediction_loss
+                # Mean squared difference of output (option to add to memory prediction loss)
                 self.loss = final_prediction_loss
-
-                # Mask for canceling out padding in dynamic sequences
-                mask = tf.squeeze(components["mask"])
 
                 # Explicit masking of loss (necessary in case a bias was added to the padding)
                 self.loss *= mask
@@ -993,7 +979,7 @@ class LifelongMemory(Agent):
                 # Loss function to optimize
                 self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
 
-                # Average loss over each (padded) sequence and batch for just final output
+                # Error(s) to record
                 self.errors = [tf.reduce_mean(tf.reduce_sum(final_prediction_loss * mask, 1) / tf.reduce_sum(mask, 1)),
                                tf.reduce_mean(tf.reduce_sum(memory_prediction_loss * mask, 1) / tf.reduce_sum(mask, 1))]
 

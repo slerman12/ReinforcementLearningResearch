@@ -6,16 +6,16 @@ import Memories
 import Brains
 from DiseaseModeling.Data import Data
 import numpy as np
-
+import time
 # Restore saved agent
-restore = True
+restore = False
 
 # Batch dim
 batch_dim = 32
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LifelongMemoryModel/testing_lifelong_memory4"
+model_directory = "LifelongMemoryModel/testing"
 
 # Data reader ["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"]
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"],
@@ -44,17 +44,17 @@ vision = Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters))
 
 # Agent memory
 agent_memory = Memories.Memories(capacity=reader.separate_time_dims(agent_memories["inputs"]).shape[0],
-                                 attributes=attributes, vision=vision.adapt({"dropout": [0, 0, 0, 0, 0, 0]}))
+                                 attributes=attributes)
 
 # Validation memory
 validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0])
 
 # Agent
-print("Multi action normal but fixed memory-closest action taken")
-agent = Agent.MultiActionLifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes, k=64)
+agent = Agent.LifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes, k=64)
 
 # Validation
-validate = agent.adapt(vision=agent_memory.vision.adapt({"batch_dim": len(reader.validation_data)}),
+validate = agent.adapt(vision=agent.vision.adapt({"batch_dim": len(reader.validation_data),
+                                                  "dropout": [0, 0, 0, 0, 0, 0]}),
                        long_term_memory=validation_memory, scope_name="validating")
 
 # Initialize metrics for measuring performance
@@ -64,8 +64,8 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       description=brain_parameters)
 
 # TensorBoard
-# agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
-#                         logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
+agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
+                        logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
                            logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
 
@@ -84,7 +84,7 @@ if __name__ == "__main__":
         if performance.is_epoch(episode, interval=10):
             # Populate memory with representations
             agent_memory.reset(
-                population={"concepts": reader.separate_time_dims(agent_memory.represent(agent_memories)),
+                population={"concepts": reader.separate_time_dims(validation_memory.represent(agent_memories)),
                             "attributes": reader.separate_time_dims(data=agent_memories["desired_outputs"],
                                                                     time_dims=agent_memories["time_dims"])})
             validation_memory.reset(
