@@ -8,18 +8,19 @@ from DiseaseModeling.Data import Data
 import numpy as np
 
 # Restore saved agent
-restore = True
+restore = False
 
 # Batch dim
 batch_dim = 32
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LifelongMemoryModel/testing_lifelong_memory4"
+model_directory = "LifelongMemoryModel/dorsal_representation_as_context_vector_with_" \
+                  "embedding_dim_64_and_sequence_dropout_0.5_and_interval_10"
 
 # Data reader ["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"]
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"],
-                     train_test_split=0.8, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0)
+                     train_test_split=0.8, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0.5)
 
 # Validation data
 validation_data = reader.read(reader.validation_data)
@@ -29,12 +30,11 @@ agent_memories = reader.read(reader.memory_data)
 validation_memories = reader.read(reader.training_memory_data)
 
 # Brain parameters
-brain_parameters = dict(input_dim=reader.input_dim, output_dim=128, max_time_dim=reader.max_num_records, num_layers=1,
-                        dropout=[0.2, 0, 0.5, 0.2, 0, 0.65], mode="block", max_gradient_clip_norm=5,
+brain_parameters = dict(input_dim=reader.input_dim, output_dim=128, max_time_dim=reader.max_num_records, num_layers=2,
+                        dropout=[0, 0, 0, 0.2, 0, 0.5], mode="block", max_gradient_clip_norm=5,
                         time_ahead_downstream=True, time_ahead_midstream=True, time_ahead_upstream=False,
-                        memory_embedding_dim=64, downstream_weights=True, raw_input_context_vector=False,
-                        visual_representation_context_vector=True, dorsal_representation_context_vector=True,
-                        num_action_suggestions=5, batch_dim=batch_dim)
+                        memory_embedding_dim=64, downstream_weights=False, raw_input_context_vector=False,
+                        visual_representation_context_vector=True, dorsal_representation_context_vector=True)
 
 # Attributes
 attributes = {"concepts": brain_parameters["memory_embedding_dim"], "attributes": reader.desired_output_dim}
@@ -50,12 +50,10 @@ agent_memory = Memories.Memories(capacity=reader.separate_time_dims(agent_memori
 validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0])
 
 # Agent
-print("Multi action normal but fixed memory-closest action taken")
-agent = Agent.MultiActionLifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes, k=64)
+agent = Agent.LifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes, k=32)
 
 # Validation
-validate = agent.adapt(vision=agent_memory.vision.adapt({"batch_dim": len(reader.validation_data)}),
-                       long_term_memory=validation_memory, scope_name="validating")
+validate = agent.adapt(vision=agent_memory.vision.adapt(), long_term_memory=validation_memory, scope_name="validating")
 
 # Initialize metrics for measuring performance
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
@@ -66,8 +64,8 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
 # TensorBoard
 # agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
 #                         logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
-validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-                           logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
+# validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
+#                            directory_name="{}/Logs/{}".format(path, model_directory))
 
 # Main method
 if __name__ == "__main__":
@@ -107,9 +105,6 @@ if __name__ == "__main__":
         agent_mse = agent.learn({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
                                  "desired_outputs": desired_outputs, "learning_rate": learning_rate})
 
-        if isinstance(agent_mse, list):
-            agent_mse = agent_mse[0]
-
         # Validation / every interval'th epoch
         validation_mse = "processing..."
         if performance.is_epoch(episode, interval=10):
@@ -136,7 +131,7 @@ if __name__ == "__main__":
         # Save and re-shuffle / every interval'th epoch
         if performance.is_epoch(episode, interval=10):
             # Save agent
-            agent.save("{}/Saved/{}".format(path, model_directory))
+            # agent.save("{}/Saved/{}".format(path, model_directory))
 
             # Shuffle training/memory split
             reader.shuffle_training_memory_split()

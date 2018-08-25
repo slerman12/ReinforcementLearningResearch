@@ -6,7 +6,7 @@ import random
 
 # Data handler
 class ReadPD:
-    def __init__(self, filename, targets, to_drop=None, train_test_split=1, train_memory_split=0, valid_eval_split=0,
+    def __init__(self, filename, targets, to_drop=None, train_test_split=1, train_memory_split=1, valid_eval_split=0,
                  sequence_dropout=False):
         # Processed data file
         file = pd.read_csv(filename)
@@ -79,9 +79,9 @@ class ReadPD:
         self.validation_data = self.start(self.validation_data_file)
         self.evaluation_data = self.start(self.evaluation_data_file)
 
-    def iterate_batch(self, batch_size):
+    def iterate_batch(self, batch_dim):
         # Reset and shuffle batch when all items have been iterated
-        if self.batch_begin > len(self.training_data) - batch_size:
+        if self.batch_begin > len(self.training_data) - batch_dim:
             # If sequence dropout
             if self.sequence_dropout:
                 self.training_data = self.start(self.training_data_file, self.sequence_dropout)
@@ -93,7 +93,7 @@ class ReadPD:
             random.shuffle(self.training_data)
 
         # Index of the end boundary of this batch
-        batch_end = min(self.batch_begin + batch_size, len(self.training_data))
+        batch_end = min(self.batch_begin + batch_dim, len(self.training_data))
 
         # Batch
         batch = self.training_data[self.batch_begin:batch_end]
@@ -154,17 +154,20 @@ class ReadPD:
             # Desired outputs + padding (desired outputs are: next - previous)
             desired_outputs = np.zeros((self.max_num_records, self.desired_output_dim), dtype=np.float64)
 
-            desired_outputs[:time_dim] = patient_records[self.targets].values[1:]
+            # desired_outputs[:time_dim] = patient_records[self.targets].values[1:]
             # desired_outputs[:time_dim] = patient_records[self.targets].values[1:] - patient_records[
             #                                                                             self.targets].values[:-1]
 
-            # # Desired outputs + padding (desired outputs are: next / previous)
-            # desired_outputs[:length] = np.divide(patient_records[targets].values[1:],
-            #                                      patient_records[targets].values[:-1],
-            #                                      out=np.zeros_like(patient_records[targets].values[1:]),
-            #                                      where=patient_records[targets].values[:-1] != 0)
+            # Desired outputs + padding (desired outputs are: next / previous)
+            desired_outputs[:time_dim] = np.divide(patient_records[self.targets].values[1:],
+                                                   patient_records[self.targets].values[:-1],
+                                                   out=np.zeros_like(patient_records[self.targets].values[1:]),
+                                                   where=patient_records[self.targets].values[:-1] != 0)
 
-            # # See which changes are very big
+            # print(desired_outputs[:time_dim])
+
+
+        # # See which changes are very big
             # for ind, i in enumerate(desired_outputs[:length]):
             #     if (np.absolute(i) > 10).any():
             #         print("\nLarge values in targets:")
@@ -221,6 +224,8 @@ class ReadPD:
         # Initialize max time dim
         max_time_dim = data.shape[1] if max_time_dim is None else max_time_dim
 
+        use_time_dims = time_dims is not None
+
         # Initialize time dims
         time_dims = np.full(batch_dims, max_time_dim) if time_dims is None else time_dims
 
@@ -232,14 +237,14 @@ class ReadPD:
             # For each time
             for time_dim in range(time_dims[batch_dim]):
                 # If padding
-                if data[batch_dim, time_dim].any():
+                if data[batch_dim, time_dim].any() or use_time_dims:
                     # Add record
                     time_dims_separated_data.append(data[batch_dim, time_dim])
                 else:
                     break
 
         # Return time dims separated
-        return np.array(time_dims_separated_data)
+        return np.squeeze(np.array(time_dims_separated_data))
 
     def shuffle_training_memory_split(self):
         # Shuffle patients
@@ -299,7 +304,7 @@ def drop(data, to_drop=None):
     missing = count_missing_values(data)
 
     # Cutoff for missing values
-    cutoff = 0.6
+    cutoff = 0.17
 
     # Drop variables with too many missing
     data = data[missing[missing["% Patients With No Record For Any Visit"] < cutoff].index.values]
@@ -309,7 +314,7 @@ def drop(data, to_drop=None):
 
     # Drop any other specific variables
     if to_drop is not None:
-        data = data.drop(to_drop, axis=1)
+        data = data.drop([x for x in to_drop if x in data.keys()], axis=1)
 
     print("\nNumber of variables dropped by manual selection (due to, say, duplicates, lack of statistical meaning, or "
           "just being unwanted): {}".format(len(to_drop)))
@@ -418,9 +423,9 @@ def process(data, to_drop):
 # Main method
 if __name__ == "__main__":
     # Preprocessed data  TODO: on & off dose
-    preprocessed = pd.read_csv("Preprocessed/preprocessed_data_treated_and_untreated_off_PD_GENPD_REGPD.csv")
+    preprocessed = pd.read_csv("Preprocessed/preprocessed_data_treated_and_untreated_off_PD.csv")
 
-    print("Treated and untreated off dose measurements, PD GENPD REGPD cohorts")
+    print("Treated and untreated off dose measurements, PD cohort")
 
     # Variables to drop
     variables_to_drop = ["EVENT_ID", "GENDER", "GENDER.y", "SXDT", "PDDXDT", "SXDT_x",
@@ -429,9 +434,3 @@ if __name__ == "__main__":
 
     # Data processing
     process(preprocessed, variables_to_drop)
-
-    # Processed data
-    processed = "Processed/encoded.csv"
-
-    # Data reader
-    ReadPD(processed, targets=["UPDRS_III"])

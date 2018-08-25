@@ -11,7 +11,8 @@ restore = False
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LSTMModelShuffleRegularize/time_ahead_midstream_interval_5"
+model_directory = "LSTMModelShuffleRegularize/time_ahead_downstream_with_interval_5_and_memory_split_0.5_" \
+                  "and_dropout_0.2_0_0.65"
 
 # Data reader
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"],
@@ -19,8 +20,8 @@ reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
-                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="fused",
-                        max_gradient_clip_norm=5, time_ahead_upstream=False, time_ahead_midstream=True)
+                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65], mode="fused",
+                        max_gradient_clip_norm=5, time_ahead_upstream=False, time_ahead_downstream=True)
 
 # Validation data
 validation_data = reader.read(reader.validation_data)

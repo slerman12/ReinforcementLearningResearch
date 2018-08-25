@@ -11,16 +11,16 @@ restore = False
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LSTMModel/time_ahead_midstream"
+model_directory = "LSTMModel/time_ahead_downstream_with_dropout_0.2_0_0.65"
 
 # Data reader
-reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III"], train_test_split=0.7,
+reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"], train_test_split=0.8,
                      valid_eval_split=1, sequence_dropout=0)
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
-                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0, 0, 0], mode="fused",
-                        max_gradient_clip_norm=5, time_ahead_midstream=True)
+                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.5],
+                        mode="block", max_gradient_clip_norm=5, time_ahead_downstream=True)
 
 # Validation data
 validation_data = reader.read(reader.validation_data)
@@ -55,7 +55,7 @@ if __name__ == "__main__":
         agent.load("{}/Saved/{}".format(path,model_directory))
 
     # Training iterations
-    for episode in range(1, 100000000000 + 1):
+    for episode in range(1, 300000 + 1):
         # Learning rate
         learning_rate = 0.0001
 
@@ -78,5 +78,5 @@ if __name__ == "__main__":
                                                                                  "Validation (MSE)": lambda x: x[-1]})
 
         # Save agent
-        if performance.is_epoch(episode):
-            agent.save("{}/Saved/{}".format(path, model_directory))
+        # if performance.is_epoch(episode):
+        #     agent.save("{}/Saved/{}".format(path, model_directory))

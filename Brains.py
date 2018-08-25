@@ -444,13 +444,14 @@ class PD_LSTM_Memory_Model(Brains):
             if self.parameters["time_ahead_upstream"]:
                 inputs = tf.concat([inputs, tf.expand_dims(time_ahead, 2)], 2)
 
-        # Dropout
-        lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(
-            tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"], forget_bias=5), output_keep_prob=
-            1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2]) for layer in range(num_layers)])
+        with tf.variable_scope('lstm1'):
+            # Dropout
+            lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(
+                tf.contrib.rnn.LSTMBlockCell(self.parameters["output_dim"], forget_bias=5), output_keep_prob=
+                1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2]) for layer in range(num_layers)])
 
-        # Outputs and states of lstm layers
-        outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, dtype=tf.float32)
+            # Outputs and states of lstm layers
+            outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, dtype=tf.float32)
 
         # Add time ahead before lstm layer
         if "time_ahead_midstream" in self.parameters:

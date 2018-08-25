@@ -170,7 +170,11 @@ class Agent:
                             # Similar memories TODO check if duplicate with distance == 0 TODO account for <k memory
                             distances, indices = memory.retrieve(query[batch_dim, time_dim], self.k)
                             remember_concepts[batch_dim, time_dim] = memory.memories["concepts"][indices]
-                            remember_attributes[batch_dim, time_dim] = memory.memories["attributes"][indices]
+                            temp = memory.memories["attributes"][indices]
+                            if len(temp.shape) == 1:
+                                remember_attributes[batch_dim, time_dim] = np.expand_dims(temp, 1)
+                            else:
+                                remember_attributes[batch_dim, time_dim] = temp
 
         # Measure time
         self.timer = time.time() - start_time
@@ -275,7 +279,7 @@ class Agent:
 
             # Fetched
             if self.tensorflow_partial_run is None:
-                fetched = self.brain.run(placeholders, fetches, self.tensorflow_partial_run)
+                [fetched] = self.brain.run(placeholders, fetches)
             else:
                 fetched, _ = self.brain.run(placeholders, fetches, self.tensorflow_partial_run)
 
@@ -315,7 +319,7 @@ class Agent:
 
         # Fetched
         if self.tensorflow_partial_run is None:
-            fetched = self.brain.run(data, fetches, self.tensorflow_partial_run)
+            [fetched] = self.brain.run(data, fetches)
         else:
             fetched, _ = self.brain.run(data, fetches, self.tensorflow_partial_run)
 
@@ -883,29 +887,84 @@ class LifelongMemory(Agent):
         # Distance weighted memory attributes (batch x time x attributes)
         distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
 
-        # Add time ahead before final dense layer
-        outputs = tf.concat([distance_weighted_memory_attributes, tf.expand_dims(placeholders["time_ahead"], 2)], 2) \
-            if parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
+        outputs = distance_weighted_memory_attributes
 
-        # Context vector
-        if "raw_input_context_vector" in parameters:
-            if parameters["raw_input_context_vector"]:
-                outputs = tf.concat([outputs, placeholders["inputs"]], 2)
-        if "visual_representation_context_vector" in parameters:
-            if parameters["visual_representation_context_vector"]:
-                outputs = tf.concat([outputs, components["vision"]], 2)
+        if "downstream_weights" in parameters:
+            if parameters["downstream_weights"]:
+                # Add time ahead before final dense layer
+                outputs = tf.concat(
+                    [distance_weighted_memory_attributes, tf.expand_dims(placeholders["time_ahead"], 2)], 2) \
+                    if parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
 
-        # Update midstream dim
-        parameters["downstream_dim"] = outputs.shape[2]
+                # Context vector residual
+                if "raw_input_context_vector" in parameters:
+                    if parameters["raw_input_context_vector"]:
+                        outputs = tf.concat([outputs, placeholders["inputs"]], 2)
+                if "visual_representation_context_vector" in parameters:
+                    if parameters["visual_representation_context_vector"]:
+                        outputs = tf.concat([outputs, components["vision"]], 2)
+                if "dorsal_representation_context_vector" in parameters:
+                    if parameters["dorsal_representation_context_vector"]:
+                        # Default cell mode ("basic", "block", "cudnn") and number of layers
+                        num_layers = parameters["num_layers"] if "num_layers" in parameters else 1
 
-        # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [parameters["downstream_dim"], parameters["output_dim"]])
+                        context_inputs = placeholders["inputs"]
 
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [parameters["output_dim"]])
+                        # Dropout
+                        if "dropout" in parameters:
+                            context_inputs = tf.nn.dropout(context_inputs, keep_prob=1 - parameters["dropout"][3])
 
-        # Dense layer
-        outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
+                        # Add time ahead before lstm layer
+                        if "time_ahead_upstream" in parameters:
+                            if parameters["time_ahead_upstream"]:
+                                context_inputs = tf.concat(
+                                    [context_inputs, tf.expand_dims(placeholders["time_ahead"], 2)], 2)
+
+                        with tf.variable_scope('lstm2'):
+                            # Dropout
+                            lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(
+                                tf.contrib.rnn.LSTMBlockCell(self.vision.brain.parameters["output_dim"], forget_bias=5),
+                                output_keep_prob=
+                                1 - parameters["dropout"][4 if layer + 1 < num_layers else 5]) for layer in
+                                range(num_layers)])
+
+                            # Outputs and states of lstm layers
+                            context_inputs, final_states = tf.nn.dynamic_rnn(lstm_layers, context_inputs,
+                                                                             placeholders["time_dims"],
+                                                                             dtype=tf.float32)
+
+                        # Mask for canceling out padding in dynamic sequences
+                        context_inputs *= tf.tile(components["mask"],
+                                                  [1, 1, self.vision.brain.parameters["output_dim"]])
+
+                        # Concatenate
+                        outputs = tf.concat([outputs, context_inputs], 2)
+
+                # Update midstream dim
+                parameters["downstream_dim"] = outputs.shape[2]
+
+                # Final dense layer weights TODO get rid of second dense layer
+                output_weights = tf.get_variable("output_weights_ya",
+                                                 [parameters["downstream_dim"], 32])
+
+                # Final dense layer bias
+                output_bias = tf.get_variable("output_bias_ya", [32])
+
+                # Dense layer
+                outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
+
+                tf.nn.dropout(outputs, keep_prob=0.65)
+
+                # Final dense layer weights
+                output_weights = tf.get_variable("output_weights", [32, parameters["output_dim"]])
+
+                # Final dense layer bias
+                output_bias = tf.get_variable("output_bias", [parameters["output_dim"]])
+
+                # Dense layer
+                outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
+
+        outputs *= tf.tile(components["mask"], [1, 1, parameters["output_dim"]])
 
         # Set brain for agent
         self.brain = Brains.Brains(brain=outputs, parameters=parameters, placeholders=placeholders)
@@ -915,29 +974,937 @@ class LifelongMemory(Agent):
             # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
             if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
                 # Mean squared difference for brain output
-                mean_squared_difference = tf.reduce_mean(
-                    tf.squared_difference(self.brain.brain, desired_outputs), axis=2)
+                final_prediction_loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+                memory_prediction_loss = tf.reduce_mean(tf.squared_difference(distance_weighted_memory_attributes,
+                                                                              desired_outputs), axis=2)
 
                 # Mean squared difference of output added to that of memory module output
-                self.loss = mean_squared_difference + tf.reduce_mean(
-                    tf.squared_difference(distance_weighted_memory_attributes, desired_outputs), axis=2)
+                # self.loss = mean_squared_difference
+                # print("no memory specific loss")
+                # self.loss = 5 * final_prediction_loss + memory_prediction_loss
+                self.loss = final_prediction_loss
 
                 # Mask for canceling out padding in dynamic sequences
-                mask = tf.sign(tf.reduce_max(tf.abs(desired_outputs), 2))
+                mask = tf.squeeze(components["mask"])
 
-                # Explicit masking of loss (necessary in case a bias was added to the padding!)
+                # Explicit masking of loss (necessary in case a bias was added to the padding)
                 self.loss *= mask
 
                 # Loss function to optimize
                 self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
 
                 # Average loss over each (padded) sequence and batch for just final output
-                self.errors = tf.reduce_mean(tf.reduce_sum(mean_squared_difference, 1) / tf.reduce_sum(mask, 1)) * mask
-                self.errors = tf.reduce_mean(tf.reduce_sum(self.errors, 1) / tf.reduce_sum(mask, 1))
+                self.errors = [tf.reduce_mean(tf.reduce_sum(final_prediction_loss * mask, 1) / tf.reduce_sum(mask, 1)),
+                               tf.reduce_mean(tf.reduce_sum(memory_prediction_loss * mask, 1) / tf.reduce_sum(mask, 1))]
 
             # else:
             #     # Mean squared error TODO add memory output
             #     self.loss = tf.losses.mean_squared_error(desired_outputs, self.brain.brain)
+
+            # If training
+            if self.scope_name == "training":
+                # Learning rate
+                learning_rate = tf.placeholder(tf.float32, shape=[])
+                self.brain.placeholders["learning_rate"] = learning_rate
+
+                # Training optimization method
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+
+                # If gradient clipping
+                if "max_gradient_clip_norm" in self.brain.parameters:
+                    # Trainable variables
+                    self.variables = tf.trainable_variables()
+
+                    # Get gradients of loss and clip them according to max gradient clip norm
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                               self.brain.parameters["max_gradient_clip_norm"])
+
+                    # Training
+                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                else:
+                    # Training TODO add memory output
+                    train = optimizer.minimize(self.loss)
+
+                # Dummy train operation for partial run
+                with tf.control_dependencies([train]):
+                    self.train = tf.constant(0)
+
+
+class MultiActionLifelongMemory(Agent):
+    def start_brain(self):
+        # Parameters (Careful, not deepcopy)
+        parameters = {}
+        parameters.update(self.vision.brain.parameters)
+        parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
+
+        # Desired outputs
+        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+
+        # Retrieved memories
+        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
+        remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
+
+        # Placeholders (Careful, not deepcopy)
+        placeholders = {}
+        placeholders.update(self.vision.brain.placeholders)
+        placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+                             "desired_outputs": desired_outputs})
+
+        # Components (Careful, not deepcopy)
+        components = {}
+        components.update(self.vision.brain.components)
+        components.update({"vision": self.vision.brain.brain,
+                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
+                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
+
+        # Embedding for memory
+        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
+        self.memory_embedding += components["memory_embedding_bias"]
+
+        # Give mask the right dimensionality
+        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+        # Mask for canceling out padding in dynamic sequences
+        self.memory_embedding *= mask
+
+        # To prevent division by 0 and to prevent NaN gradients from square root of 0
+        distance_delta = 0.001
+
+        # Distances (batch x time x k)
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
+                                                                        [1, 1, self.k, 1]), remember_concepts), axis=3)
+                            + distance_delta ** 2)
+
+        # Weights (batch x time x k x attributes)
+        weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
+
+        action_suggestion_list = [(tf.einsum('aij,jk->aik', components["vision"],
+                                             tf.get_variable("output_weights_{}".format(i),
+                                                             [parameters["midstream_dim"],
+                                                              parameters["output_dim"]]))
+                                   + tf.get_variable("output_bias_{}".format(i), [parameters["output_dim"]]))
+                                  * tf.tile(components["mask"], [1, 1, parameters["output_dim"]]) for i in
+                                  range(parameters["num_action_suggestions"])]
+
+        action_suggestions = tf.stack(action_suggestion_list)
+
+        # Set brain for agent
+        self.brain = Brains.Brains(brain=distance_weighted_memory_attributes, parameters=parameters,
+                                   placeholders=placeholders)
+
+        # If not just representing memories, compute the loss
+        if self.scope_name != "memory_representation":
+            # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+            if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+                # Mask for canceling out padding in dynamic sequences
+                mask = tf.squeeze(components["mask"])
+
+                # Mean squared difference for brain output
+                self.loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2) * mask
+
+                # Loss function to optimize
+                self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
+
+                # Errors
+                self.errors = [self.loss]
+
+                # Record error for each suggested action
+                for action in action_suggestion_list:
+                    mse = tf.reduce_mean(tf.squared_difference(action, desired_outputs), 2) * mask
+                    action_loss = tf.reduce_mean(tf.reduce_sum(mse, 1) / tf.reduce_sum(mask, 1))
+                    self.errors += [action_loss]
+
+                # Add loss for each suggested action
+                action_mask = tf.tile(tf.expand_dims(mask, 0), [parameters["num_action_suggestions"], 1, 1])
+                mse = tf.reduce_mean(tf.squared_difference(
+                    action_suggestions, tf.tile(tf.expand_dims(desired_outputs, 0),
+                                                [parameters["num_action_suggestions"], 1, 1, 1])), axis=3) * action_mask
+                self.loss += tf.reduce_sum(tf.reduce_mean(tf.reduce_sum(mse, 2) / tf.reduce_sum(action_mask, 2), 1))
+
+                # Action difference from memory
+                action_memory_difference = tf.reduce_sum(
+                    tf.squared_difference(action_suggestions,
+                                          tf.tile(tf.expand_dims(self.brain.brain, 0),
+                                                  [parameters["num_action_suggestions"], 1, 1, 1])), 3)
+
+                # Action indices
+                batch_indices = tf.expand_dims(tf.tile(tf.expand_dims(tf.range(parameters["batch_dim"], dtype=tf.int64),
+                                                                      axis=1), [1, parameters["max_time_dim"]]), axis=2)
+                time_indices = tf.expand_dims(tf.tile(tf.expand_dims(tf.range(parameters["max_time_dim"]), axis=0),
+                                                      [parameters["batch_dim"], 1]), axis=2)
+                memory_informed_action_indices = tf.argmin(action_memory_difference, axis=0)
+                memory_informed_action_indices = tf.expand_dims(memory_informed_action_indices, 2)
+                memory_informed_action_indices = tf.concat([memory_informed_action_indices, batch_indices], 2)
+                memory_informed_action_indices = tf.concat([memory_informed_action_indices, time_indices], 2)
+
+                # Action taken
+                action_taken = tf.gather_nd(action_suggestions, memory_informed_action_indices)
+
+                # Error
+                error = tf.reduce_mean(tf.squared_difference(action_taken, desired_outputs), 2) * mask
+                error = tf.reduce_mean(tf.reduce_sum(error, 1) / tf.reduce_sum(mask, 1))
+
+                # Push final error
+                self.errors.insert(0, error)
+                self.loss = 3 * error + self.errors[1]
+
+            # If training
+            if self.scope_name == "training":
+                # Learning rate
+                learning_rate = tf.placeholder(tf.float32, shape=[])
+                self.brain.placeholders["learning_rate"] = learning_rate
+
+                # Training optimization method
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+
+                # If gradient clipping
+                if "max_gradient_clip_norm" in self.brain.parameters:
+                    # Trainable variables
+                    self.variables = tf.trainable_variables()
+
+                    # Get gradients of loss and clip them according to max gradient clip norm
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                               self.brain.parameters["max_gradient_clip_norm"])
+
+                    # Training
+                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                else:
+                    # Training TODO add memory output
+                    train = optimizer.minimize(self.loss)
+
+                # Dummy train operation for partial run
+                with tf.control_dependencies([train]):
+                    self.train = tf.constant(0)
+
+
+class WeightedMultiActionMemory(Agent):
+    def start_brain(self):
+        # Parameters (Careful, not deepcopy)
+        parameters = {}
+        parameters.update(self.vision.brain.parameters)
+        parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
+
+        # Desired outputs
+        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+
+        # Retrieved memories
+        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
+        remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
+
+        # Placeholders (Careful, not deepcopy)
+        placeholders = {}
+        placeholders.update(self.vision.brain.placeholders)
+        placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+                             "desired_outputs": desired_outputs})
+
+        # Components (Careful, not deepcopy)
+        components = {}
+        components.update(self.vision.brain.components)
+        components.update({"vision": self.vision.brain.brain,
+                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
+                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
+
+        # Embedding for memory
+        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
+        self.memory_embedding += components["memory_embedding_bias"]
+
+        # Give mask the right dimensionality
+        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+        # Mask for canceling out padding in dynamic sequences
+        self.memory_embedding *= mask
+
+        # To prevent division by 0 and to prevent NaN gradients from square root of 0
+        distance_delta = 0.001
+
+        # Distances (batch x time x k)
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
+                                                                        [1, 1, self.k, 1]), remember_concepts), axis=3)
+                            + distance_delta ** 2)
+
+        # Weights (batch x time x k x attributes)
+        weights = tf.tile(tf.expand_dims(1.0 / (distances + 1) ** 2, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
+
+        action_suggestions = [(tf.einsum('aij,jk->aik', components["vision"],
+                                         tf.get_variable("output_weights_{}".format(i), [parameters["midstream_dim"],
+                                                                                         parameters["output_dim"]]))
+                               + tf.get_variable("output_bias_{}".format(i), [parameters["output_dim"]]))
+                              * tf.tile(components["mask"], [1, 1, parameters["output_dim"]]) for i in
+                              range(parameters["num_action_suggestions"])]
+
+        # Distances (a x batch x time)
+        distances = tf.sqrt(tf.reduce_sum(
+            tf.squared_difference(tf.tile(tf.expand_dims(distance_weighted_memory_attributes, axis=0),
+                                          [parameters["num_action_suggestions"], 1, 1, 1]), action_suggestions), axis=3)
+                            + distance_delta ** 2)
+
+        # Weights (a x batch x time x attributes)
+        weights = tf.tile(tf.expand_dims(1.0 / (distances + 1) ** 2, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * action_suggestions, axis=0)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=0)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        memory_distance_weighted_predictions = tf.divide(numerator, safe_denominator)
+
+        # Set brain for agent
+        self.brain = Brains.Brains(brain=memory_distance_weighted_predictions, parameters=parameters,
+                                   placeholders=placeholders)
+
+        # If not just representing memories, compute the loss
+        if self.scope_name != "memory_representation":
+            # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+            if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+                # Mean squared difference for brain output
+                error = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+
+                # Mask for canceling out padding in dynamic sequences
+                mask = tf.squeeze(components["mask"])
+
+                # Explicit masking of loss (necessary in case a bias was added to the padding)
+                error *= mask
+
+                # Loss function to optimize
+                error = tf.reduce_mean(tf.reduce_sum(error, 1) / tf.reduce_sum(mask, 1))
+
+                memory_error = tf.reduce_mean(tf.squared_difference(distance_weighted_memory_attributes,
+                                                                    desired_outputs), 2) * mask
+                memory_error = tf.reduce_mean(tf.reduce_sum(memory_error, 1) / tf.reduce_sum(mask, 1))
+
+                self.errors = [error, memory_error]
+                self.loss = error + memory_error
+
+                # Add loss for each suggested action
+                for action in action_suggestions:
+                    mse = tf.reduce_mean(tf.squared_difference(action, desired_outputs), 2) * mask
+                    action_loss = tf.reduce_mean(tf.reduce_sum(mse, 1) / tf.reduce_sum(mask, 1))
+                    self.errors += [action_loss]
+                    self.loss += action_loss
+
+            # If training
+            if self.scope_name == "training":
+                # Learning rate
+                learning_rate = tf.placeholder(tf.float32, shape=[])
+                self.brain.placeholders["learning_rate"] = learning_rate
+
+                # Training optimization method
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+
+                # If gradient clipping
+                if "max_gradient_clip_norm" in self.brain.parameters:
+                    # Trainable variables
+                    self.variables = tf.trainable_variables()
+
+                    # Get gradients of loss and clip them according to max gradient clip norm
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                               self.brain.parameters["max_gradient_clip_norm"])
+
+                    # Training
+                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                else:
+                    # Training TODO add memory output
+                    train = optimizer.minimize(self.loss)
+
+                # Dummy train operation for partial run
+                with tf.control_dependencies([train]):
+                    self.train = tf.constant(0)
+
+
+class VariedMultiActionMemory(Agent):
+    def start_brain(self):
+        # Parameters (Careful, not deepcopy)
+        parameters = {}
+        parameters.update(self.vision.brain.parameters)
+        parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
+
+        # Desired outputs
+        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+
+        # Retrieved memories
+        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
+        remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
+
+        # Placeholders (Careful, not deepcopy)
+        placeholders = {}
+        placeholders.update(self.vision.brain.placeholders)
+        placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+                             "desired_outputs": desired_outputs})
+
+        # Components (Careful, not deepcopy)
+        components = {}
+        components.update(self.vision.brain.components)
+        components.update({"vision": self.vision.brain.brain,
+                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
+                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
+
+        # Embedding for memory
+        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
+        self.memory_embedding += components["memory_embedding_bias"]
+
+        # Give mask the right dimensionality
+        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+        # Mask for canceling out padding in dynamic sequences
+        self.memory_embedding *= mask
+
+        # To prevent division by 0 and to prevent NaN gradients from square root of 0
+        distance_delta = 0.001
+
+        # Distances (batch x time x k)
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
+                                                                        [1, 1, self.k, 1]), remember_concepts), axis=3)
+                            + distance_delta ** 2)
+
+        # Weights (batch x time x k x attributes)
+        weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
+
+        action_suggestions = [(tf.einsum('aij,jk->aik', components["vision"],
+                                         tf.get_variable("output_weights_{}".format(i), [parameters["midstream_dim"],
+                                                                                         parameters["output_dim"]]))
+                               + tf.get_variable("output_bias_{}".format(i), [parameters["output_dim"]]))
+                              * tf.tile(components["mask"], [1, 1, parameters["output_dim"]]) for i in
+                              range(parameters["num_action_suggestions"])]
+
+        # Set brain for agent
+        self.brain = Brains.Brains(brain=distance_weighted_memory_attributes, parameters=parameters,
+                                   placeholders=placeholders)
+
+        # If not just representing memories, compute the loss
+        if self.scope_name != "memory_representation":
+            # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+            if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+                # Mean squared difference for brain output
+                self.loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+
+                # Mask for canceling out padding in dynamic sequences
+                mask = tf.squeeze(components["mask"])
+
+                # Explicit masking of loss (necessary in case a bias was added to the padding)
+                self.loss *= mask
+
+                # Loss function to optimize
+                self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
+
+                self.errors = [self.loss]
+
+                # Add loss for each suggested action
+                for action in action_suggestions:
+                    mse = tf.reduce_mean(tf.squared_difference(action, desired_outputs), 2) * mask
+                    action_loss = tf.reduce_mean(tf.reduce_sum(mse, 1) / tf.reduce_sum(mask, 1))
+                    self.loss += action_loss
+                    self.errors += [action_loss]
+
+                mean_action = tf.reduce_mean(action_suggestions, axis=0)
+                # TODO mask, axis
+                # avg_dist_from_mean = tf.reduce_mean(
+                #     tf.reduce_sum(tf.squared_difference(tf.convert_to_tensor(action_suggestions),
+                #                                         tf.tile(mean_action, parameters["num_action_suggestions"])), 3))
+
+                sum_squared_diff_from_mean = tf.reduce_sum(
+                    tf.squared_difference(tf.convert_to_tensor(action_suggestions),
+                                          tf.tile(tf.expand_dims(mean_action, 0), [parameters["num_action_suggestions"],
+                                                                                   1, 1, 1])))
+
+                self.loss *= 100000
+                self.loss -= (sum_squared_diff_from_mean + distance_delta)
+
+                self.errors += [sum_squared_diff_from_mean]
+
+                min_distance = 999999999999.
+                action_taken = distance_weighted_memory_attributes
+                for action in action_suggestions:
+                    distance = tf.norm(action - self.brain.brain)
+                    min_distance, action_taken = tf.cond(distance < min_distance,
+                                                         lambda: (distance, action),
+                                                         lambda: (min_distance, action_taken))
+
+                error = tf.reduce_mean(tf.squared_difference(action_taken, desired_outputs), 2) * mask
+                error = tf.reduce_mean(tf.reduce_sum(error, 1) / tf.reduce_sum(mask, 1))
+
+                # Push final error
+                self.errors.insert(0, error)
+
+            # If training
+            if self.scope_name == "training":
+                # Learning rate
+                learning_rate = tf.placeholder(tf.float32, shape=[])
+                self.brain.placeholders["learning_rate"] = learning_rate
+
+                # Training optimization method
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+
+                # If gradient clipping
+                if "max_gradient_clip_norm" in self.brain.parameters:
+                    # Trainable variables
+                    self.variables = tf.trainable_variables()
+
+                    # Get gradients of loss and clip them according to max gradient clip norm
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                               self.brain.parameters["max_gradient_clip_norm"])
+
+                    # Training
+                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                else:
+                    # Training TODO add memory output
+                    train = optimizer.minimize(self.loss)
+
+                # Dummy train operation for partial run
+                with tf.control_dependencies([train]):
+                    self.train = tf.constant(0)
+
+
+class VariedByTakenMultiActionMemory(Agent):
+    def start_brain(self):
+        # Parameters (Careful, not deepcopy)
+        parameters = {}
+        parameters.update(self.vision.brain.parameters)
+        parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
+
+        # Desired outputs
+        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+
+        # Retrieved memories
+        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
+        remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
+
+        # Placeholders (Careful, not deepcopy)
+        placeholders = {}
+        placeholders.update(self.vision.brain.placeholders)
+        placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+                             "desired_outputs": desired_outputs})
+
+        # Components (Careful, not deepcopy)
+        components = {}
+        components.update(self.vision.brain.components)
+        components.update({"vision": self.vision.brain.brain,
+                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
+                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
+
+        # Embedding for memory
+        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
+        self.memory_embedding += components["memory_embedding_bias"]
+
+        # Give mask the right dimensionality
+        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+        # Mask for canceling out padding in dynamic sequences
+        self.memory_embedding *= mask
+
+        # To prevent division by 0 and to prevent NaN gradients from square root of 0
+        distance_delta = 0.001
+
+        # Distances (batch x time x k)
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
+                                                                        [1, 1, self.k, 1]), remember_concepts), axis=3)
+                            + distance_delta ** 2)
+
+        # Weights (batch x time x k x attributes)
+        weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
+
+        action_suggestion_list = [(tf.einsum('aij,jk->aik', components["vision"],
+                                             tf.get_variable("output_weights_{}".format(i),
+                                                             [parameters["midstream_dim"],
+                                                              parameters["output_dim"]]))
+                                   + tf.get_variable("output_bias_{}".format(i), [parameters["output_dim"]]))
+                                  * tf.tile(components["mask"], [1, 1, parameters["output_dim"]]) for i in
+                                  range(parameters["num_action_suggestions"])]
+        action_suggestions = tf.stack(action_suggestion_list)
+
+        # Set brain for agent
+        self.brain = Brains.Brains(brain=distance_weighted_memory_attributes, parameters=parameters,
+                                   placeholders=placeholders)
+
+        # If not just representing memories, compute the loss
+        if self.scope_name != "memory_representation":
+            # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+            if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+                # Mask for canceling out padding in dynamic sequences
+                mask = tf.squeeze(components["mask"])
+
+                # Mean squared difference for brain output
+                memory_loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+
+                # Loss function to optimize
+                self.loss = tf.reduce_mean(tf.reduce_sum(memory_loss * mask, 1) / tf.reduce_sum(mask, 1))
+                self.errors = [self.loss]
+
+                action_memory_difference = tf.reduce_sum(
+                    tf.squared_difference(action_suggestions,
+                                          tf.tile(tf.expand_dims(self.brain.brain, 0),
+                                                  [parameters["num_action_suggestions"], 1, 1, 1])), 3)
+
+                memory_informed_action_indices = tf.argmin(action_memory_difference, axis=0)
+
+                batch_indices = tf.expand_dims(tf.tile(tf.expand_dims(tf.range(parameters["batch_dim"], dtype=tf.int64),
+                                                                      axis=1), [1, parameters["max_time_dim"]]), axis=2)
+                time_indices = tf.expand_dims(tf.tile(tf.expand_dims(tf.range(parameters["max_time_dim"]), axis=0),
+                                                      [parameters["batch_dim"], 1]), axis=2)
+
+                memory_informed_action_indices = tf.expand_dims(memory_informed_action_indices, 2)
+                memory_informed_action_indices = tf.concat([memory_informed_action_indices, batch_indices], 2)
+                memory_informed_action_indices = tf.concat([memory_informed_action_indices, time_indices], 2)
+
+                action_taken = tf.gather_nd(action_suggestions, memory_informed_action_indices)
+
+                # Add loss for each suggested action
+                for action in action_suggestion_list:
+                    mse = tf.reduce_mean(tf.squared_difference(action, desired_outputs), 2) * mask
+                    action_loss = tf.reduce_mean(tf.reduce_sum(mse, 1) / tf.reduce_sum(mask, 1))
+                    action_difference_from_taken = tf.reduce_sum(tf.squared_difference(action, action_taken), 2)
+                    action_difference_from_taken_loss = tf.reduce_mean(
+                        tf.reduce_sum(action_difference_from_taken, 1) / tf.reduce_sum(mask, 1))
+                    self.loss += action_loss / (action_difference_from_taken_loss + 0.001)
+                    self.errors += [action_loss]
+
+                error = tf.reduce_mean(tf.squared_difference(action_taken, desired_outputs), 2) * mask
+                error = tf.reduce_mean(tf.reduce_sum(error, 1) / tf.reduce_sum(mask, 1))
+
+                # Push final error
+                self.errors.insert(0, error)
+
+            # If training
+            if self.scope_name == "training":
+                # Learning rate
+                learning_rate = tf.placeholder(tf.float32, shape=[])
+                self.brain.placeholders["learning_rate"] = learning_rate
+
+                # Training optimization method
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+
+                # If gradient clipping
+                if "max_gradient_clip_norm" in self.brain.parameters:
+                    # Trainable variables
+                    self.variables = tf.trainable_variables()
+
+                    # Get gradients of loss and clip them according to max gradient clip norm
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                               self.brain.parameters["max_gradient_clip_norm"])
+
+                    # Training
+                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                else:
+                    # Training TODO add memory output
+                    train = optimizer.minimize(self.loss)
+
+                # Dummy train operation for partial run
+                with tf.control_dependencies([train]):
+                    self.train = tf.constant(0)
+
+
+class SigmoidVariedMultiActionMemory(Agent):
+    def start_brain(self):
+        # Parameters (Careful, not deepcopy)
+        parameters = {}
+        parameters.update(self.vision.brain.parameters)
+        parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
+
+        # Desired outputs
+        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+
+        # Retrieved memories
+        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
+        remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
+
+        # Placeholders (Careful, not deepcopy)
+        placeholders = {}
+        placeholders.update(self.vision.brain.placeholders)
+        placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+                             "desired_outputs": desired_outputs})
+
+        # Components (Careful, not deepcopy)
+        components = {}
+        components.update(self.vision.brain.components)
+        components.update({"vision": self.vision.brain.brain,
+                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
+                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
+
+        # Embedding for memory
+        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
+        self.memory_embedding += components["memory_embedding_bias"]
+
+        # Give mask the right dimensionality
+        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+        # Mask for canceling out padding in dynamic sequences
+        self.memory_embedding *= mask
+
+        # To prevent division by 0 and to prevent NaN gradients from square root of 0
+        distance_delta = 0.001
+
+        # Distances (batch x time x k)
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
+                                                                        [1, 1, self.k, 1]), remember_concepts), axis=3)
+                            + distance_delta ** 2)
+
+        # Weights (batch x time x k x attributes)
+        weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
+
+        action_suggestions = [(tf.einsum('aij,jk->aik', components["vision"],
+                                         tf.get_variable("output_weights_{}".format(i), [parameters["midstream_dim"],
+                                                                                         parameters["output_dim"]]))
+                               + tf.get_variable("output_bias_{}".format(i), [parameters["output_dim"]]))
+                              * tf.tile(components["mask"], [1, 1, parameters["output_dim"]]) for i in
+                              range(parameters["num_action_suggestions"])]
+
+        # Set brain for agent
+        self.brain = Brains.Brains(brain=distance_weighted_memory_attributes, parameters=parameters,
+                                   placeholders=placeholders)
+
+        # If not just representing memories, compute the loss
+        if self.scope_name != "memory_representation":
+            # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+            if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+                # Mean squared difference for brain output
+                self.loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+
+                # Mask for canceling out padding in dynamic sequences
+                mask = tf.squeeze(components["mask"])
+
+                # Explicit masking of loss (necessary in case a bias was added to the padding)
+                self.loss *= mask
+
+                # Loss function to optimize
+                self.loss = tf.reduce_mean(tf.reduce_sum(self.loss, 1) / tf.reduce_sum(mask, 1))
+
+                self.errors = [self.loss]
+
+                # Add loss for each suggested action
+                for action in action_suggestions:
+                    mse = tf.reduce_mean(tf.squared_difference(action, desired_outputs), 2) * mask
+                    action_loss = tf.reduce_mean(tf.reduce_sum(mse, 1) / tf.reduce_sum(mask, 1))
+                    self.loss += action_loss
+                    self.errors += [action_loss]
+
+                mean_action = tf.reduce_mean(action_suggestions, axis=0)
+                # TODO mask, axis
+                # avg_dist_from_mean = tf.reduce_mean(
+                #     tf.reduce_sum(tf.squared_difference(tf.convert_to_tensor(action_suggestions),
+                #                                         tf.tile(mean_action, parameters["num_action_suggestions"])), 3))
+
+                sum_squared_diff_from_mean = tf.reduce_sum(
+                    tf.squared_difference(tf.convert_to_tensor(action_suggestions),
+                                          tf.tile(tf.expand_dims(mean_action, 0), [parameters["num_action_suggestions"],
+                                                                                   1, 1, 1])))
+
+                self.loss *= tf.sigmoid(1 / sum_squared_diff_from_mean)
+
+                self.errors += [tf.sigmoid(1 / sum_squared_diff_from_mean)]
+
+                min_distance = 999999999999.
+                action_taken = distance_weighted_memory_attributes
+                for action in action_suggestions:
+                    distance = tf.norm(action - self.brain.brain)
+                    min_distance, action_taken = tf.cond(distance < min_distance,
+                                                         lambda: (distance, action),
+                                                         lambda: (min_distance, action_taken))
+
+                error = tf.reduce_mean(tf.squared_difference(action_taken, desired_outputs), 2) * mask
+                error = tf.reduce_mean(tf.reduce_sum(error, 1) / tf.reduce_sum(mask, 1))
+
+                # Push final error
+                self.errors.insert(0, error)
+
+            # If training
+            if self.scope_name == "training":
+                # Learning rate
+                learning_rate = tf.placeholder(tf.float32, shape=[])
+                self.brain.placeholders["learning_rate"] = learning_rate
+
+                # Training optimization method
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+
+                # If gradient clipping
+                if "max_gradient_clip_norm" in self.brain.parameters:
+                    # Trainable variables
+                    self.variables = tf.trainable_variables()
+
+                    # Get gradients of loss and clip them according to max gradient clip norm
+                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                               self.brain.parameters["max_gradient_clip_norm"])
+
+                    # Training
+                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+                else:
+                    # Training TODO add memory output
+                    train = optimizer.minimize(self.loss)
+
+                # Dummy train operation for partial run
+                with tf.control_dependencies([train]):
+                    self.train = tf.constant(0)
+
+
+class ProbabalisticVariedByTakenMultiActionMemory(Agent):
+    def start_brain(self):
+        # Parameters (Careful, not deepcopy)
+        parameters = {}
+        parameters.update(self.vision.brain.parameters)
+        parameters.update({"input_dim": parameters["midstream_dim"], "output_dim": self.attributes["attributes"]})
+
+        # Desired outputs
+        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+
+        # Retrieved memories
+        remember_concepts = tf.placeholder("float", [None, None, self.k, self.attributes["concepts"]])
+        remember_attributes = tf.placeholder("float", [None, None, self.k, self.attributes["attributes"]])
+
+        # Placeholders (Careful, not deepcopy)
+        placeholders = {}
+        placeholders.update(self.vision.brain.placeholders)
+        placeholders.update({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+                             "desired_outputs": desired_outputs})
+
+        # Components (Careful, not deepcopy)
+        components = {}
+        components.update(self.vision.brain.components)
+        components.update({"vision": self.vision.brain.brain,
+                           "memory_embedding_weights": self.long_term_memory.brain.components["embedding_weights"],
+                           "memory_embedding_bias": self.long_term_memory.brain.components["embedding_bias"]})
+
+        # Embedding for memory
+        self.memory_embedding = tf.einsum('aij,jk->aik', components["vision"], components["memory_embedding_weights"])
+        self.memory_embedding += components["memory_embedding_bias"]
+
+        # Give mask the right dimensionality
+        mask = tf.tile(components["mask"], [1, 1, parameters["memory_embedding_dim"]])
+
+        # Mask for canceling out padding in dynamic sequences
+        self.memory_embedding *= mask
+
+        # To prevent division by 0 and to prevent NaN gradients from square root of 0
+        distance_delta = 0.001
+
+        # Distances (batch x time x k)
+        distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.tile(tf.expand_dims(self.memory_embedding, axis=2),
+                                                                        [1, 1, self.k, 1]), remember_concepts), axis=3)
+                            + distance_delta ** 2)
+
+        # Weights (batch x time x k x attributes)
+        weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+
+        # Division numerator and denominator (for weighted means)
+        numerator = tf.reduce_sum(weights * remember_attributes, axis=2)  # Weigh attributes
+        denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
+
+        # In case denominator is zero
+        safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
+
+        # Distance weighted memory attributes (batch x time x attributes)
+        distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
+
+        action_suggestion_list = [(tf.einsum('aij,jk->aik', components["vision"],
+                                             tf.get_variable("output_weights_{}".format(i),
+                                                             [parameters["midstream_dim"],
+                                                              parameters["output_dim"]]))
+                                   + tf.get_variable("output_bias_{}".format(i), [parameters["output_dim"]]))
+                                  * tf.tile(components["mask"], [1, 1, parameters["output_dim"]]) for i in
+                                  range(parameters["num_action_suggestions"])]
+        action_suggestions = tf.stack(action_suggestion_list)
+
+        # Set brain for agent
+        self.brain = Brains.Brains(brain=distance_weighted_memory_attributes, parameters=parameters,
+                                   placeholders=placeholders)
+
+        # If not just representing memories, compute the loss
+        if self.scope_name != "memory_representation":
+            # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+            if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+                # Mask for canceling out padding in dynamic sequences
+                mask = tf.squeeze(components["mask"])
+
+                # Mean squared difference for brain output
+                memory_loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+
+                # Loss function to optimize
+                self.loss = tf.reduce_mean(tf.reduce_sum(memory_loss * mask, 1) / tf.reduce_sum(mask, 1))
+                self.errors = [self.loss]
+
+                action_memory_difference = tf.reduce_sum(
+                    tf.squared_difference(action_suggestions,
+                                          tf.tile(tf.expand_dims(self.brain.brain, 0),
+                                                  [parameters["num_action_suggestions"], 1, 1, 1])), 3)
+
+                memory_informed_action_indices = tf.argmin(action_memory_difference, axis=0)
+
+                batch_indices = tf.expand_dims(tf.tile(tf.expand_dims(tf.range(parameters["batch_dim"], dtype=tf.int64),
+                                                                      axis=1), [1, parameters["max_time_dim"]]), axis=2)
+                time_indices = tf.expand_dims(tf.tile(tf.expand_dims(tf.range(parameters["max_time_dim"]), axis=0),
+                                                      [parameters["batch_dim"], 1]), axis=2)
+
+                memory_informed_action_indices = tf.expand_dims(memory_informed_action_indices, 2)
+                memory_informed_action_indices = tf.concat([memory_informed_action_indices, batch_indices], 2)
+                memory_informed_action_indices = tf.concat([memory_informed_action_indices, time_indices], 2)
+
+                action_taken = tf.gather_nd(action_suggestions, memory_informed_action_indices)
+
+                # Add loss for each suggested action
+                for action in action_suggestions:
+                    mse = tf.reduce_mean(tf.squared_difference(action, desired_outputs), 2) * mask
+                    action_loss = tf.reduce_mean(tf.reduce_sum(mse, 1) / tf.reduce_sum(mask, 1))
+                    action_difference_from_taken = tf.reduce_sum(tf.squared_difference(action, action_taken), 2)
+                    action_difference_from_taken_loss = tf.reduce_mean(
+                        tf.reduce_sum(action_difference_from_taken, 1) / tf.reduce_sum(mask, 1))
+                    self.loss += action_loss / (action_difference_from_taken_loss + 0.001)
+                    self.errors += [action_loss]
+
+                error = tf.reduce_mean(tf.squared_difference(action_taken, desired_outputs), 2) * mask
+                error = tf.reduce_mean(tf.reduce_sum(error, 1) / tf.reduce_sum(mask, 1))
+
+                # Push final error
+                self.errors.insert(0, error)
 
             # If training
             if self.scope_name == "training":
