@@ -80,8 +80,8 @@ class Performance:
                 # Print metrics
                 for key in self.metrics:
                     if key != "Total Elapsed Time":
-                        print("* {}: {}".format(key, aggregation(self.metrics[key]) if key not in special_aggregation
-                        else special_aggregation[key](self.metrics[key])))
+                        print("* {}: {}".format(key, aggregation(self.metrics[key], axis=0)
+                        if key not in special_aggregation else special_aggregation[key](self.metrics[key])))
                 print("")
 
             # Output metrics to file

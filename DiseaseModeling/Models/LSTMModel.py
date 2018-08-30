@@ -19,23 +19,21 @@ reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II
 
 # Brain parameters
 brain_parameters = dict(batch_dim=32, input_dim=reader.input_dim, hidden_dim=128, output_dim=reader.desired_output_dim,
-                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.5],
+                        max_time_dim=reader.max_num_records, num_layers=1, dropout=[0.2, 0, 0.65],
                         mode="block", max_gradient_clip_norm=5, time_ahead_downstream=True)
 
 # Validation data
 validation_data = reader.read(reader.validation_data)
 
-# Validation parameters
-validation_parameters = brain_parameters.copy()
-validation_parameters["dropout"] = [0, 0, 0]
-validation_parameters["batch_dim"] = len(reader.validation_data)
+# Vision
+vision = Vision.Vision(brain=Brains.PD_LSTM_Model(brain_parameters))
 
 # Agent
-agent = Agent.Regressor(vision=Vision.Vision(brain=Brains.PD_LSTM_Model(brain_parameters)))
+agent = Agent.Regressor(vision=vision)
 
 # Validation
-validate = Agent.Regressor(vision=Vision.Vision(brain=Brains.PD_LSTM_Model(validation_parameters)),
-                           session=agent.session, scope_name="validating")
+validate = agent.adapt(vision=vision.adapt({"dropout": [0, 0, 0], "batch_dim": len(reader.validation_data)}),
+                       scope_name="validating")
 
 # Initialize metrics for measuring performance
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate", "RMSE",
@@ -55,7 +53,7 @@ if __name__ == "__main__":
         agent.load("{}/Saved/{}".format(path,model_directory))
 
     # Training iterations
-    for episode in range(1, 300000 + 1):
+    for episode in range(1, 250000 + 1):
         # Learning rate
         learning_rate = 0.0001
 
@@ -67,16 +65,19 @@ if __name__ == "__main__":
                             "learning_rate": learning_rate, "time_ahead": time_ahead})
 
         # Validate
-        validation_mse = validate.measure_errors(validation_data) if performance.is_epoch(episode) else None
+        validation_mse = "processing"
+        if performance.is_epoch(episode, interval=10):
+            validation_mse = validate.measure_errors(validation_data) if performance.is_epoch(episode) else None
 
         # Measure performance
         performance.measure_performance({"Episode": episode, "Learn Time": agent.timer, "Learning Rate": learning_rate,
                                          "RMSE": np.sqrt(loss), "Loss (MSE)": loss, "Validation (MSE)": validation_mse})
 
         # Display performance
-        performance.output_performance(run_through=episode, special_aggregation={"Episode": lambda x: x[-1],
-                                                                                 "Validation (MSE)": lambda x: x[-1]})
+        performance.output_performance(run_through=episode, interval=10,
+                                       special_aggregation={"Episode": lambda x: x[-1],
+                                                            "Validation (MSE)": lambda x: x[-1]})
 
         # Save agent
-        # if performance.is_epoch(episode):
-        #     agent.save("{}/Saved/{}".format(path, model_directory))
+        if performance.is_epoch(episode):
+            agent.save("{}/Saved/{}".format(path, model_directory))

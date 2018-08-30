@@ -51,13 +51,13 @@ class ReadPD:
         patients = list(file["PATNO"].unique())
 
         # Shuffle patients
-        random.Random(4).shuffle(patients)
+        random.Random().shuffle(patients)
 
         # Split training sets
-        self.training_memory_data_patients = patients[:round(self.train_test_split * len(patients))]
+        self.training_memory_data_patients = list(patients[:round(self.train_test_split * len(patients))])
         self.train_memory_split_index = round(self.train_memory_split * len(self.training_memory_data_patients))
-        self.training_data_patients = self.training_memory_data_patients[:self.train_memory_split_index]
-        self.memory_data_patients = self.training_memory_data_patients[self.train_memory_split_index:]
+        self.training_data_patients = list(self.training_memory_data_patients[:self.train_memory_split_index])
+        self.memory_data_patients = list(self.training_memory_data_patients[self.train_memory_split_index:])
 
         # Split testing sets
         self.testing_data_patients = patients[round(self.train_test_split * len(patients)):]
@@ -163,7 +163,6 @@ class ReadPD:
                                                    patient_records[self.targets].values[:-1],
                                                    out=np.zeros_like(patient_records[self.targets].values[1:]),
                                                    where=patient_records[self.targets].values[:-1] != 0)
-
             # print(desired_outputs[:time_dim])
 
 
@@ -248,11 +247,11 @@ class ReadPD:
 
     def shuffle_training_memory_split(self):
         # Shuffle patients
-        random.Random(4).shuffle(self.training_memory_data_patients)
+        random.Random().shuffle(self.training_memory_data_patients)
 
         # Split into training and memory data
-        self.training_data_patients = self.training_memory_data_patients[:self.train_memory_split_index]
-        self.memory_data_patients = self.training_memory_data_patients[self.train_memory_split_index:]
+        self.training_data_patients = list(self.training_memory_data_patients[:self.train_memory_split_index])
+        self.memory_data_patients = list(self.training_memory_data_patients[self.train_memory_split_index:])
 
         # Assigns data sets
         self.training_data_file = self.training_memory_data_file[

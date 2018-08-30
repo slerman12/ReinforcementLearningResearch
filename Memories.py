@@ -188,7 +188,8 @@ class Memories:
                                    "memory_embedding": memory_embedding})
 
                 # Brain
-                self.brain = Brains.Brains(brain=memory_embedding, placeholders=placeholders, components=components)
+                self.brain = Brains.Brains(brain=memory_embedding, parameters=parameters, placeholders=placeholders,
+                                           components=components)
 
     def represent(self, placeholders=None, partial_run_setup=None):
         # Get memory representation

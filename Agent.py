@@ -2,8 +2,6 @@ from __future__ import division
 import time
 import numpy as np
 import tensorflow as tf
-from copy import deepcopy
-
 import Brains
 
 
@@ -82,17 +80,24 @@ class Agent:
             # See
             scene = state
         elif self.tensorflow:
+            # Default no partial run setup
+            partial_run_setup = None
+
             # Setup a partial run such that the graph is not recomputed later TODO arbitrary projections
-            error_fetches = self.errors if isinstance(self.errors, list) else [self.errors]
-            partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] + error_fetches
-                                   if fetch is not None]
-            partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) > 0 else None
+            if self.tensorflow_partial_run is None:
+                # Use errors if applicable
+                if not isinstance(self.errors, list):
+                    self.errors = [self.loss] if self.errors is None else [self.errors]
+
+                # Components to be fetched
+                partial_run_fetches = [self.train, self.tensorboard_logs] + self.errors
+
+                # Setup the partial run if there are components to be fetched
+                if len(partial_run_fetches):
+                    partial_run_setup = [partial_run_fetches, self.brain.placeholders]
 
             # See
-            if partial_run_setup is None:
-                scene = self.vision.see(state)
-            else:
-                scene, self.tensorflow_partial_run = self.vision.see(state, partial_run_setup=partial_run_setup)
+            scene, self.tensorflow_partial_run = self.vision.see(state, partial_run_setup=partial_run_setup)
         else:
             # See
             scene = self.vision.see(state)
@@ -119,23 +124,25 @@ class Agent:
 
         # If TensorFlow and a representation for memory can be made
         if self.tensorflow and memory_embedding is not None:
-            # If no partial run already active
-            if self.tensorflow_partial_run is None:
-                # Setup a partial run such that the graph is not recomputed later TODO arbitrary projections
-                error_fetches = self.errors if isinstance(self.errors, list) else [self.errors]
-                partial_run_fetches = [fetch for fetch in [self.train, self.loss, self.tensorboard_logs] + error_fetches
-                                       if fetch is not None]
-                partial_run_setup = [partial_run_fetches, self.brain.placeholders] if len(partial_run_fetches) else None
+            # Default no partial run setup
+            partial_run_setup = None
 
-                # Get embedding for memory
-                if partial_run_setup is None:
-                    query = self.brain.run(query, memory_embedding)
-                else:
-                    query, self.tensorflow_partial_run = self.brain.run(query, memory_embedding,
-                                                                        partial_run_setup=partial_run_setup)
-            else:
-                # Get representation using active partial run
-                query, _ = self.brain.run(query, memory_embedding, self.tensorflow_partial_run)
+            # Setup a partial run such that the graph is not recomputed later TODO arbitrary projections
+            if self.tensorflow_partial_run is None:
+                # Use errors if applicable
+                if not isinstance(self.errors, list):
+                    self.errors = [self.loss] if self.errors is None else [self.errors]
+
+                # Components to be fetched
+                partial_run_fetches = [self.train, self.tensorboard_logs] + self.errors
+
+                # Setup the partial run if there are components to be fetched
+                if len(partial_run_fetches):
+                    partial_run_setup = [partial_run_fetches, self.brain.placeholders]
+
+            # Get representation using partial run
+            query, self.tensorflow_partial_run = self.brain.run(query, memory_embedding,
+                                                                self.tensorflow_partial_run, partial_run_setup)
 
         # Initialize batch dims
         batch_dims = query.shape[0] if batch_dims is None else batch_dims
@@ -263,7 +270,7 @@ class Agent:
         # Train brain
         if self.train is not None and self.tensorflow:
             # Increment learning steps
-            learning_steps = self.brain.run(components=[self.increment_learning_steps])[0]
+            learning_steps, _ = self.brain.run(components=[self.increment_learning_steps])
 
             # Fetches
             fetches = {"train": self.train}
@@ -277,10 +284,7 @@ class Agent:
                 fetches.update({"logs": self.tensorboard_logs})
 
             # Fetched
-            if self.tensorflow_partial_run is None:
-                [fetched] = self.brain.run(placeholders, fetches)
-            else:
-                fetched, _ = self.brain.run(placeholders, fetches, self.tensorflow_partial_run)
+            fetched, _ = self.brain.run(placeholders, fetches, self.tensorflow_partial_run)
 
             # Errors
             errors = fetched["errors"]
@@ -303,7 +307,7 @@ class Agent:
         start_time = time.time()
 
         # Learning steps
-        learning_steps = self.brain.run(components=[self.learning_steps])[0]
+        learning_steps, _ = self.brain.run(components=[self.learning_steps])
 
         # Fetches
         fetches = {}
@@ -317,10 +321,7 @@ class Agent:
             fetches.update({"logs": self.tensorboard_logs})
 
         # Fetched
-        if self.tensorflow_partial_run is None:
-            [fetched] = self.brain.run(data, fetches)
-        else:
-            fetched, _ = self.brain.run(data, fetches, self.tensorflow_partial_run)
+        fetched, _ = self.brain.run(data, fetches, self.tensorflow_partial_run)
 
         # Output TensorBoard logs
         if self.tensorboard_logs is not None and learning_steps % self.tensorboard_logging_interval == 0:
@@ -341,6 +342,33 @@ class Agent:
 
         # Move perception of time forward
         self.perception_of_time += time_quantum
+
+    def adapt(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
+              actions=None, exploration_rate=None, k=None, tensorflow=None, scope_name="adapted", session=None):
+        # Bodies
+        bodies = [self.vision, self.long_term_memory, self.short_term_memory, self.traces]
+
+        # Genes
+        genes = [self.attributes, self.actions, self.exploration_rate, self.k, self.tensorflow, self.session]
+
+        # Mutations
+        body_mutations = [vision, long_term_memory, short_term_memory, traces]
+        gene_mutations = [attributes, actions, exploration_rate, k, tensorflow, session]
+
+        # Default bodies
+        for i, mutation in enumerate(body_mutations):
+            if mutation is None and bodies[i] is not None:
+                body_mutations[i] = bodies[i].adapt()
+
+        # Default genes
+        for i, mutation in enumerate(gene_mutations):
+            if mutation is None:
+                gene_mutations[i] = genes[i]
+
+        # Return adapted agent
+        return self.__class__(body_mutations[0], body_mutations[1], body_mutations[2], body_mutations[3],
+                              gene_mutations[0], gene_mutations[1], gene_mutations[2], gene_mutations[3],
+                              gene_mutations[4], scope_name, gene_mutations[5])
 
     def start_tensorflow(self):
         # Open scope, start brains (build graphs), and begin session
@@ -377,33 +405,6 @@ class Agent:
             if body is not None:
                 if body.brain is not None:
                     body.brain.session = self.session
-
-    def adapt(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
-              actions=None, exploration_rate=None, k=None, tensorflow=None, scope_name="adapted", session=None):
-        # Bodies
-        bodies = [self.vision, self.long_term_memory, self.short_term_memory, self.traces]
-
-        # Genes
-        genes = [self.attributes, self.actions, self.exploration_rate, self.k, self.tensorflow, self.session]
-
-        # Mutations
-        body_mutations = [vision, long_term_memory, short_term_memory, traces]
-        gene_mutations = [attributes, actions, exploration_rate, k, tensorflow, session]
-
-        # Default bodies
-        for i, mutation in enumerate(body_mutations):
-            if mutation is None and bodies[i] is not None:
-                body_mutations[i] = bodies[i].adapt()
-
-        # Default genes
-        for i, mutation in enumerate(gene_mutations):
-            if mutation is None:
-                gene_mutations[i] = genes[i]
-
-        # Return adapted agent
-        return self.__class__(body_mutations[0], body_mutations[1], body_mutations[2], body_mutations[3],
-                              gene_mutations[0], gene_mutations[1], gene_mutations[2], gene_mutations[3],
-                              gene_mutations[4], scope_name, gene_mutations[5])
 
     def save(self, filename="Saved/brain"):
         # Save to file
@@ -772,8 +773,7 @@ class Regressor(Agent):
         self.vision.start_brain()
 
         # Set brain for agent
-        self.brain = Brains.Brains(brain=self.vision.brain.brain, parameters=self.vision.brain.parameters,
-                                   placeholders=self.vision.brain.placeholders)
+        self.brain = self.vision.brain
 
         # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
         if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
@@ -875,23 +875,24 @@ class LifelongMemory(Agent):
         # Distance weighted memory attributes (batch x time x attributes)
         distance_weighted_memory_attributes = tf.divide(numerator, safe_denominator)
 
+        if "no_memory" in parameters:
+            if parameters["no_memory"]:
+                distance_weighted_memory_attributes = components["memory"][:, :, 0:4]
+
         # Default outputs (memory module's distance-weighted predictions)
         outputs = distance_weighted_memory_attributes
 
         if "downstream_weights" in parameters:
             if parameters["downstream_weights"]:
-                # Add time ahead before final dense layer
-                outputs = tf.concat(
-                    [distance_weighted_memory_attributes, tf.expand_dims(placeholders["time_ahead"], 2)], 2) \
-                    if parameters["time_ahead_downstream"] else distance_weighted_memory_attributes
-
                 # Context vector residual
                 if "raw_input_context_vector" in parameters:
                     if parameters["raw_input_context_vector"]:
-                        outputs = tf.concat([outputs, placeholders["inputs"]], 2)
+                        context_inputs = placeholders["inputs"]
+                        outputs = tf.concat([outputs, context_inputs], 2)
                 if "visual_representation_context_vector" in parameters:
                     if parameters["visual_representation_context_vector"]:
-                        outputs = tf.concat([outputs, components["vision"]], 2)
+                        context_inputs = components["vision"]
+                        outputs = tf.concat([outputs, context_inputs], 2)
                 if "dorsal_representation_context_vector" in parameters:
                     if parameters["dorsal_representation_context_vector"]:
                         # Default cell mode ("basic", "block", "cudnn") and number of layers
@@ -929,24 +930,29 @@ class LifelongMemory(Agent):
                         # Concatenate
                         outputs = tf.concat([outputs, context_inputs], 2)
 
+                # Add time ahead before final dense layer
+                if parameters["time_ahead_downstream"]:
+                    outputs = tf.concat([outputs, tf.expand_dims(placeholders["time_ahead"], 2)], 2)
+
                 # Update midstream dim
                 parameters["downstream_dim"] = outputs.shape[2]
 
-                # Final dense layer weights TODO get rid of second dense layer
-                output_weights = tf.get_variable("output_weights_ya",
-                                                 [parameters["downstream_dim"], 32])
-
-                # Final dense layer bias
-                output_bias = tf.get_variable("output_bias_ya", [32])
-
-                # Dense layer
-                outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
-
-                # Dropout
-                tf.nn.dropout(outputs, keep_prob=0.65)
+                # # Final dense layer weights TODO get rid of second dense layer
+                # output_weights = tf.get_variable("output_weights_ya",
+                #                                  [parameters["downstream_dim"], 32])
+                #
+                # # Final dense layer bias
+                # output_bias = tf.get_variable("output_bias_ya", [32])
+                #
+                # # Dense layer
+                # outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
+                #
+                # # Dropout
+                # tf.nn.dropout(outputs, keep_prob=0.65)
 
                 # Final dense layer weights
-                output_weights = tf.get_variable("output_weights", [32, parameters["output_dim"]])
+                output_weights = tf.get_variable("output_weights", [parameters["downstream_dim"],
+                                                                    parameters["output_dim"]])
 
                 # Final dense layer bias
                 output_bias = tf.get_variable("output_bias", [parameters["output_dim"]])
@@ -954,67 +960,73 @@ class LifelongMemory(Agent):
                 # Dense layer
                 outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
 
+                if "context_memory_sum" in parameters:
+                    if parameters["context_memory_sum"]:
+                        outputs += distance_weighted_memory_attributes
+
         # Apply mask to outputs
         outputs *= tf.tile(components["mask"], [1, 1, parameters["output_dim"]])
 
         # Set brain for agent
-        self.brain = Brains.Brains(brain=outputs, parameters=parameters, placeholders=placeholders)
+        self.brain = Brains.Brains(parameters, outputs, placeholders, components)
 
-        # If not just representing memories, compute the loss
-        if self.scope_name != "memory_representation":
-            # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
-            if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
-                # Mask for canceling out padding in dynamic sequences
-                mask = tf.squeeze(components["mask"])
-                mask_normalizer = tf.reduce_sum(mask, 1)
+        # If outputs are sequences with dynamic numbers of time dimensions (this is an ugly way to check that)
+        if "max_time_dim" in self.brain.parameters and len(self.brain.brain.shape.as_list()) > 2:
+            # Mask for canceling out padding in dynamic sequences
+            mask = tf.squeeze(components["mask"])
+            mask_normalizer = tf.reduce_sum(mask, 1)
 
-                # Mean squared difference for brain output
-                final_prediction_loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
-                final_prediction_loss *= mask
-                final_prediction_loss = tf.reduce_mean(tf.reduce_sum(final_prediction_loss, 1) / mask_normalizer)
+            # Mean squared difference for brain output
+            final_prediction_loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+            final_prediction_loss *= mask
+            final_prediction_loss = tf.reduce_mean(tf.reduce_sum(final_prediction_loss, 1) / mask_normalizer)
 
-                # Mean squared difference for memory module output
-                memory_prediction_loss = tf.reduce_mean(tf.squared_difference(distance_weighted_memory_attributes,
-                                                                              desired_outputs), axis=2) * mask
-                memory_prediction_loss = tf.reduce_mean(tf.reduce_sum(memory_prediction_loss, 1) / mask_normalizer)
+            # Mean squared difference for memory module output
+            memory_prediction_loss = tf.reduce_mean(tf.squared_difference(distance_weighted_memory_attributes,
+                                                                          desired_outputs), axis=2) * mask
+            memory_prediction_loss = tf.reduce_mean(tf.reduce_sum(memory_prediction_loss, 1) / mask_normalizer)
 
-                # Loss function to optimize
-                self.loss = final_prediction_loss
+            # Loss function to optimize
+            self.loss = 0
+            if "final_prediction_loss" in parameters:
+                if parameters["final_prediction_loss"]:
+                    self.loss += final_prediction_loss
+                    if "final_prediction_loss_weight" in parameters:
+                        self.loss *= parameters["final_prediction_loss_weight"]
+            if "memory_prediction_loss" in parameters:
+                if parameters["memory_prediction_loss"]:
+                    self.loss += memory_prediction_loss
 
-                # Error(s) to record (Note: TensorFlow leaks memory if these elements aren't predefined above)
-                self.errors = [final_prediction_loss, memory_prediction_loss]
+            # Error(s) to record (Note: TensorFlow partial_run can leak memory with these)
+            self.errors = [final_prediction_loss, memory_prediction_loss]
 
-            # else:
-            #     # Mean squared error TODO add memory output
-            #     self.loss = tf.losses.mean_squared_error(desired_outputs, self.brain.brain)
+        # If training
+        if self.scope_name == "training":
+            # Learning rate
+            learning_rate = tf.placeholder(tf.float32, shape=[])
+            self.brain.placeholders["learning_rate"] = learning_rate
 
-            # If training
-            if self.scope_name == "training":
-                # Learning rate
-                learning_rate = tf.placeholder(tf.float32, shape=[])
-                self.brain.placeholders["learning_rate"] = learning_rate
+            # Training optimization method
+            optimizer = tf.train.AdamOptimizer(learning_rate)
 
-                # Training optimization method
-                optimizer = tf.train.AdamOptimizer(learning_rate)
+            # If gradient clipping
+            if "max_gradient_clip_norm" in self.brain.parameters:
+                # Trainable variables
+                self.variables = tf.trainable_variables()
 
-                # If gradient clipping
-                if "max_gradient_clip_norm" in self.brain.parameters:
-                    # Trainable variables
-                    self.variables = tf.trainable_variables()
+                # Get gradients of loss and clip them according to max gradient clip norm
+                self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                           self.brain.parameters["max_gradient_clip_norm"])
 
-                    # Get gradients of loss and clip them according to max gradient clip norm
-                    self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
-                                                               self.brain.parameters["max_gradient_clip_norm"])
+                # Training
+                train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+            else:
+                # Training
+                train = optimizer.minimize(self.loss)
 
-                    # Training
-                    train = optimizer.apply_gradients(zip(self.gradients, self.variables))
-                else:
-                    # Training TODO add memory output
-                    train = optimizer.minimize(self.loss)
-
-                # Dummy train operation for partial run
-                with tf.control_dependencies([train]):
-                    self.train = tf.constant(0)
+            # Dummy train operation for partial run
+            with tf.control_dependencies([train]):
+                self.train = tf.constant(0)
 
 
 class MultiActionLifelongMemory(Agent):

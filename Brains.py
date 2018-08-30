@@ -1,5 +1,4 @@
 import tensorflow as tf
-from copy import deepcopy
 
 
 class Brains:
@@ -27,36 +26,57 @@ class Brains:
         if placeholders is None:
             placeholders = {}
 
-        # For singular component not in list
-        if components is not None and not isinstance(components, list):
+        # Partial run setup if list not provided but requested
+        if partial_run_setup is True:
+            partial_run_setup = [[fetch for fetch in list(self.components.values()) if fetch is not None],
+                                 self.placeholders]
+        elif isinstance(partial_run_setup, list):
+            assert len(partial_run_setup) == 2
+            partial_run_setup[0] = [fetch for fetch in partial_run_setup[0] if fetch is not None]
+            for i, fetch in enumerate(partial_run_setup[0]):
+                if isinstance(fetch, str):
+                    partial_run_setup[0][i] = self.components[fetch]
+
+        # Graph placeholders to use
+        if partial_run_setup is None:
+            placeholders = {self.placeholders[key]: placeholders[key] for key in placeholders if key in
+                            self.placeholders and self.placeholders[key] is not None}
+        else:
+            placeholders = {partial_run_setup[1][key]: placeholders[key] for key in placeholders if key in
+                            partial_run_setup[1]}
+
+        # Graph component(s) to run
+        if components is None:
+            components = [self.brain]
+        elif isinstance(components, str):
+            components = [self.components[components]]
+        elif isinstance(components, list):
+            for i, component in enumerate(components):
+                if isinstance(component, str):
+                    components[i] = self.components[component]
+        else:
             components = [components]
+        components = [component for component in components if component is not None]
 
-        # Run inputs through brain
+        # If TensorFlow
         if self.tensorflow:
-            # If regular running, just call session.run on the parameters
-            if partial_run_setup is None and partial_run is None:
-                # Return the regular run
-                return self.session.run(self.brain if components is None else components,
-                                        feed_dict={self.placeholders[key]: placeholders[key] for key in placeholders
-                                                   if key in self.placeholders and self.placeholders[key] is not None})
-            elif partial_run is None:
-                # Otherwise do a "partial run" such that this part of the graph isn't recomputed later when it's reused
-                fetches = partial_run_setup[0] + [self.brain] if components is None else partial_run_setup[0] + \
-                                                                                         components
-                feeds = [partial_run_setup[1][key] for key in partial_run_setup[1]]
-                partial_run = self.session.partial_run_setup(fetches, feeds)
+            # Set up partial run
+            if partial_run is None and partial_run_setup is not None:
+                partial_run = self.session.partial_run_setup(partial_run_setup[0] + components,
+                                                             list(partial_run_setup[1].values()))
 
-                placeholders = {key: placeholders[key] for key in placeholders if key in partial_run_setup[1]}
-
-            # Output single value rather than list
-            if components is not None:
+            # Output single element if components is a single item list
+            if isinstance(components, list):
                 if len(components) == 1:
                     components = components[0]
 
-            # Return the result of the partial run and the partial graph
-            return self.session.partial_run(partial_run, self.brain if components is None else components,
-                                            {self.placeholders[key]: placeholders[key] for key in placeholders if key in
-                                             self.placeholders and self.placeholders[key] is not None}), partial_run
+            # If not partial run, return regular run
+            if partial_run is None:
+                # Return the regular run
+                return self.session.run(components, feed_dict=placeholders), None
+            else:
+                # Return the result and the partially computed graph
+                return self.session.partial_run(partial_run, components, placeholders), partial_run
 
     def build(self):
         pass
