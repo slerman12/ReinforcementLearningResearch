@@ -109,7 +109,7 @@ if __name__ == "__main__":
         validation_mse = "processing..."
         if performance.is_epoch(episode, interval=10):
             # Remember
-            remember_concepts, remember_attributes = validate.remember({"inputs": validation_data["inputs"],
+            remember_concepts, remember_attributes = validate.expect({"inputs": validation_data["inputs"],
                                                                         "time_dims": validation_data["time_dims"],
                                                                         "time_ahead": validation_data["time_ahead"]})
 

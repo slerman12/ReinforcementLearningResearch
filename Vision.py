@@ -36,7 +36,7 @@ class Vision:
             with tf.name_scope(name_scope):
                 self.brain.build()
 
-    def see(self, state, batch_dims=1, time_dims=1, partial_run_setup=None):
+    def see(self, state, do_partial_run=False):
         # Set state TODO better to give option to preprocess all data at once if available
         self.state = state
 
@@ -55,7 +55,7 @@ class Vision:
             self.state = cv2.resize(self.state, dsize=self.size)
 
         # Get meaningful representation
-        return self.brain.run(self.state, partial_run_setup=partial_run_setup)
+        return self.brain.run(self.state, do_partial_run=do_partial_run)
 
     def experience(self, experience):
         pass

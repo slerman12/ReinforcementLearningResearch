@@ -29,30 +29,30 @@ agent_memories = reader.read(reader.memory_data)
 validation_memories = reader.read(reader.training_memory_data)
 
 # Brain parameters
-brain_parameters = dict(input_dim=reader.input_dim, output_dim=128, max_time_dim=reader.max_num_records, num_layers=1,
-                        dropout=[0.2, 0, 0.5, 0.2, 0, 0.65], mode="block", max_gradient_clip_norm=5,
+brain_parameters = dict(input_dim=reader.input_dim, midstream_dim=128, max_time_dim=reader.max_num_records,
+                        num_layers=1, dropout=[0.2, 0, 0.5, 0.2, 0, 0.65], mode="block", max_gradient_clip_norm=5,
                         time_ahead_downstream=True, time_ahead_midstream=True, time_ahead_upstream=False,
-                        memory_embedding_dim=64, downstream_weights=True, raw_input_context_vector=False,
+                        memory_embedding_dim=64, downstream_weights=False, raw_input_context_vector=False,
                         visual_representation_context_vector=True, dorsal_representation_context_vector=True,
                         num_action_suggestions=1, batch_dim=batch_dim,
                         final_prediction_loss=True, memory_prediction_loss=False, final_prediction_loss_weight=1,
                         memory_closest_prediction_loss=False, context_memory_sum=True)
 
 # Attributes
-attributes = {"concepts": brain_parameters["memory_embedding_dim"], "attributes": reader.desired_output_dim}
+attributes = {"representations": brain_parameters["memory_embedding_dim"], "attributes": reader.desired_output_dim}
 
 # Vision
 vision = Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters))
 
 # Agent memory
 agent_memory = Memories.Memories(capacity=reader.separate_time_dims(agent_memories["inputs"]).shape[0],
-                                 attributes=attributes)
+                                 attributes=attributes, num_similar_memories=32)
 
 # Validation memory
 validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0])
 
 # Agent
-agent = Agent.LifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes, k=32)
+agent = Agent.LifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes)
 
 # Validation
 validate = agent.adapt(vision=agent.vision.adapt({"batch_dim": len(reader.validation_data), "dropout": np.zeros(6)}),
@@ -64,14 +64,19 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       run_throughs_per_epoch=len(reader.training_data) // batch_dim,
                                       description=[brain_parameters,
                                                    "Sequence Dropout: {}, Train/Test Split: {}, Train/Memory Split: {},"
-                                                   " K: {}".format(reader.sequence_dropout, reader.train_test_split,
-                                                                   reader.train_memory_split, agent.k)])
+                                                   " Num Similar Memories: {}".format(
+                                                       reader.sequence_dropout, reader.train_test_split,
+                                                       reader.train_memory_split, agent_memory.num_similar_memories)])
 
 # TensorBoard
-# agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
-#                         logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
-# validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-#                            logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
+agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
+                        logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
+validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
+                           logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
+
+# TensorFlow partial run
+agent.start_tensorflow_partial_run(["representation", agent.errors, agent.train])
+validate.start_tensorflow_partial_run(["representation", validate.errors])
 
 # Main method
 if __name__ == "__main__":
@@ -88,11 +93,11 @@ if __name__ == "__main__":
         if performance.is_epoch(episode, interval=10):
             # Populate memory with representations
             agent_memory.reset(
-                population={"concepts": reader.separate_time_dims(agent_memory.represent(agent_memories)[0]),
+                population={"representations": reader.separate_time_dims(validation_memory.represent(agent_memories)),
                             "attributes": reader.separate_time_dims(data=agent_memories["desired_outputs"],
                                                                     time_dims=agent_memories["time_dims"])})
             validation_memory.reset(
-                population={"concepts": reader.separate_time_dims(validation_memory.represent(validation_memories)[0]),
+                population={"representations": reader.separate_time_dims(validation_memory.represent(validation_memories)),
                             "attributes": reader.separate_time_dims(data=validation_memories["desired_outputs"],
                                                                     time_dims=validation_memories["time_dims"])})
 
@@ -104,24 +109,24 @@ if __name__ == "__main__":
         inputs, desired_outputs, time_dims, time_ahead = reader.iterate_batch(batch_dim)
 
         # Remember
-        remember_concepts, remember_attributes = agent.remember({"inputs": inputs, "time_dims": time_dims,
-                                                                 "time_ahead": time_ahead})
+        remembered = agent.remember({"inputs": inputs, "time_dims": time_dims, "time_ahead": time_ahead})
 
         # Train
-        agent_mse = agent.learn({"remember_concepts": remember_concepts, "remember_attributes": remember_attributes,
+        agent_mse = agent.learn({"remembered_representations": remembered["representations"],
+                                 "remembered_attributes": remembered["attributes"],
                                  "desired_outputs": desired_outputs, "learning_rate": learning_rate})
 
         # Validation -- every interval'th epoch
         validation_mse = "processing..."
         if performance.is_epoch(episode, interval=10):
             # Remember
-            remember_concepts, remember_attributes = validate.remember({"inputs": validation_data["inputs"],
-                                                                        "time_dims": validation_data["time_dims"],
-                                                                        "time_ahead": validation_data["time_ahead"]})
+            remembered = validate.remember({"inputs": validation_data["inputs"],
+                                            "time_dims": validation_data["time_dims"],
+                                            "time_ahead": validation_data["time_ahead"]})
 
             # Validate
-            validation_mse = validate.measure_errors({"remember_concepts": remember_concepts,
-                                                      "remember_attributes": remember_attributes,
+            validation_mse = validate.measure_errors({"remembered_representations": remembered["representations"],
+                                                      "remembered_attributes": remembered["attributes"],
                                                       "desired_outputs": validation_data["desired_outputs"]})
 
         # Measure performance
