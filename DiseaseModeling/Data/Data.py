@@ -267,6 +267,35 @@ class ReadPD:
         self.batch_begin = 0
 
 
+# Count various rare events in the course of PD
+def count_rare_events(data):
+    print(data["NP1HALL"].describe())
+    print(data["COGSTATE"].unique())
+
+
+    # MDS-UPDRS item 1.2 Hallucinations and Psychosis
+    visual_hallucinations = data[data["NP1HALL"] >= 1]
+
+    # Determination of Falls item 1. Does the participant report freezing of gait occurring in the past week?
+    # recurrent_falls_1 = data[data["FRZGT1W"] >= 3]
+    #
+    # Falls item 2. Does participant report falls occurring in the past week that were not related to freezing of gait?
+    # recurrent_falls_2 = data[data["FLNFR1W"] >= 2]
+
+    # Cognitive Categorization item 3. Which of the following categories best describes the subject’s cognitive state?
+    pd_dementia = data[data["COGSTATE"] == '3S']
+
+    #  "Patients reporting recurrent falls due to freezing of gate: {}\n"
+    #  "Patients reporting recurrent falls  unrelated to freezing of gait: {}\n"
+    print("Total number of patients: {}\n"
+          "Patients reporting visual hallucinations: {}\n" 
+          "Patients experiencing PD dementia: {}".format(len(data["PATNO"].unique()),
+                                                         len(visual_hallucinations["PATNO"].unique()),
+                                                         # len(recurrent_falls_1["PATNO"].unique()),
+                                                         # len(recurrent_falls_2["PATNO"].unique()),
+                                                         len(pd_dementia["PATNO"].unique())))
+
+
 # Count missing variables per variable and visit and output summary to csv
 def count_missing_values(data):
     # Variables with no records per patient
@@ -432,4 +461,5 @@ if __name__ == "__main__":
                          "INITMDDT", "INITMDVS", "ANNUAL_TIME_BTW_DOSE_NUPDRS_y"]
 
     # Data processing
-    process(preprocessed, variables_to_drop)
+    # process(preprocessed, variables_to_drop)
+    count_rare_events(preprocessed)

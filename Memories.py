@@ -1,5 +1,7 @@
 from __future__ import division
 import math
+import random
+
 import numpy as np
 # from pyflann.index import FLANN
 from copy import deepcopy
@@ -10,16 +12,21 @@ import tensorflow as tf
 
 
 class Traces:
-    def __init__(self, capacity, attributes, memories, reward_discount):
+    def __init__(self, capacity, attributes, reward_discount, memories, experience_replay=None):
         # Initialize dict of traces
         self.traces = {}
 
-        # Arrays of memory traces for calculating values from rewards TODO: add support for >2D memory
+        # Arrays of memory traces for calculating values from rewards
         for attribute, dimensionality in attributes.items():
-            if dimensionality > 1:
-                self.traces[attribute] = np.zeros((capacity, dimensionality))
+            if isinstance(dimensionality, int):
+                if dimensionality > 1:
+                    self.traces[attribute] = np.zeros((capacity, dimensionality))
+                else:
+                    self.traces[attribute] = np.zeros(capacity)
+            elif isinstance(dimensionality, tuple):
+                self.traces[attribute] = np.zeros((capacity,) + dimensionality)
             else:
-                self.traces[attribute] = np.zeros(capacity)
+                self.traces[attribute] = np.zeros([capacity] + dimensionality)
 
         # Indices of attributes (such as scene, reward, value, etc.)
         self.attributes = attributes
@@ -30,11 +37,14 @@ class Traces:
         # Current number of memory traces
         self.length = 0
 
+        # Reward discount
+        self.reward_discount = reward_discount
+
         # Memories to store into
         self.memories = memories
 
-        # Reward discount
-        self.reward_discount = reward_discount
+        # Experience replay to store into
+        self.experience_replay = experience_replay
 
     def add(self, trace):
         # Reward of trace
@@ -76,6 +86,10 @@ class Traces:
             else:
                 self.memories.store(memory)
 
+            # Add memory to experience replay
+            if self.experience_replay is not None:
+                self.experience_replay.store(memory)
+
             # Pop memory from traces and add
             for attribute, dimensionality in self.attributes.items():
                 # Pop trace
@@ -93,6 +107,10 @@ class Traces:
                     self.memories[int(trace["action"])].store(trace)
                 else:
                     self.memories.store(trace)
+
+                # Add memory to experience replay
+                if self.experience_replay is not None:
+                    self.experience_replay.store(trace)
 
             # Reset traces
             self.reset()
@@ -112,29 +130,42 @@ class Traces:
         # Reset internal states
         self.length = 0
         for attribute, dimensionality in self.attributes.items():
-            if dimensionality > 1:
-                self.traces[attribute] = np.zeros((self.capacity, dimensionality))
+            if isinstance(dimensionality, int):
+                if dimensionality > 1:
+                    self.traces[attribute] = np.zeros((self.capacity, dimensionality))
+                else:
+                    self.traces[attribute] = np.zeros(self.capacity)
+            elif isinstance(dimensionality, tuple):
+                self.traces[attribute] = np.zeros((self.capacity,) + dimensionality)
             else:
-                self.traces[attribute] = np.zeros(self.capacity)
+                self.traces[attribute] = np.zeros([self.capacity] + dimensionality)
 
 
 class Memories:
-    def __init__(self, capacity, attributes, num_similar_memories=32, tensorflow=True):
+    def __init__(self, capacity, attributes, target_attribute="target", num_similar_memories=32, tensorflow=True):
         # Initialize memories
         self.memories = {}
 
         # Arrays of memory
         for attribute, dimensionality in attributes.items():
-            if dimensionality > 1:
-                self.memories[attribute] = np.zeros((capacity, dimensionality))
+            if isinstance(dimensionality, int):
+                if dimensionality > 1:
+                    self.memories[attribute] = np.zeros((capacity, dimensionality))
+                else:
+                    self.memories[attribute] = np.zeros(capacity)
+            elif isinstance(dimensionality, tuple):
+                self.memories[attribute] = np.zeros((capacity,) + dimensionality)
             else:
-                self.memories[attribute] = np.zeros(capacity)
+                self.memories[attribute] = np.zeros([capacity] + dimensionality)
+
+        # Max number of memories
+        self.capacity = capacity
 
         # Memory attributes (such as scene, state, reward, value, etc.) and their dimensionality
         self.attributes = attributes
 
-        # Max number of memories
-        self.capacity = capacity
+        # Attribute being predicted
+        self.target_attribute = target_attribute
 
         # Number of similar memories to retrieve
         self.num_similar_memories = num_similar_memories
@@ -169,23 +200,24 @@ class Memories:
 
                 # Parameters
                 parameters.update({"input_dim": projection.parameters["output_dim"],
-                                   "representation_dim": projection.parameters["memory_embedding_dim"],
-                                   "output_dim": self.attributes["attributes"]})
+                                   "representation_dim": self.attributes["representation"],
+                                   "output_dim": self.attributes[self.target_attribute]})
 
                 # Placeholders
                 placeholders.update(projection.placeholders)
 
                 # Components
                 components.update({"inputs": projection.brain})
-                if "mask" in projection.components:
-                    components.update({"mask": projection.components["mask"]})
+                if projection.components is not None:
+                    if "mask" in projection.components:
+                        components.update({"mask": projection.components["mask"]})
 
                 # Embedding weights and bias
                 embedding_weights = tf.get_variable("memory_embedding_weights",
                                                     [parameters["input_dim"], parameters["representation_dim"]])
                 embedding_bias = tf.get_variable("memory_embedding_bias", [parameters["representation_dim"]])
 
-                # Embedding for memory
+                # Embedding for memory TODO account for 1-dim
                 representation = tf.einsum("aj,jk->ak" if len(projection.brain.shape) == 2 else "aij,jk->aik",
                                            projection.brain, embedding_weights) + embedding_bias
 
@@ -203,9 +235,9 @@ class Memories:
 
                 # Retrieved memories
                 remembered_representations = tf.placeholder("float", [None, None, self.num_similar_memories,
-                                                                      self.attributes["representations"]])
+                                                                      self.attributes["representation"]])
                 remembered_attributes = tf.placeholder("float", [None, None, self.num_similar_memories,
-                                                                 self.attributes["attributes"]])
+                                                                 parameters["output_dim"]])
 
                 # Placeholders
                 placeholders.update({"remembered_representations": remembered_representations,
@@ -218,9 +250,14 @@ class Memories:
                 distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(
                     tf.tile(tf.expand_dims(representation, 2), [1, 1, self.num_similar_memories, 1]),
                     remembered_representations), 3) + distance_delta ** 2)
+                # distances = tf.reduce_sum(tf.squared_difference(
+                #     tf.tile(tf.expand_dims(representation, 2), [1, 1, self.num_similar_memories, 1]),
+                #     remembered_representations), 3)
 
                 # Weights (batch x time x k x attributes)
-                weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, self.attributes["attributes"]])
+                weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, parameters["output_dim"]])
+                # weights = tf.tile(tf.expand_dims(1.0 / (distances + distance_delta), axis=3),
+                #                   [1, 1, 1, self.attributes["attributes"]])
 
                 # Division numerator and denominator (for weighted means)
                 numerator = tf.reduce_sum(weights * remembered_attributes, axis=2)  # Weigh attributes
@@ -238,7 +275,7 @@ class Memories:
                     outputs *= tf.tile(components["mask"], [1, 1, parameters["output_dim"]])
 
                 # Components
-                components.update({"outputs": outputs})
+                components.update({"outputs": outputs, "expectation": outputs})
 
                 # Brain
                 self.brain = Brains.Brains(brain=outputs, parameters=parameters, placeholders=placeholders,
@@ -262,7 +299,7 @@ class Memories:
         # Modified
         self.modified = True
 
-    def remember(self, representation, perception_of_time=None, time_dims=None):
+    def retrieve(self, representation, perception_of_time=None, time_dims=None):
         # Batch x time inputs
         if len(representation.shape) < 3:
             if len(representation.shape) == 1:
@@ -275,7 +312,10 @@ class Memories:
 
         # Initialize remembered attributes
         remembered = {attribute: np.zeros([representation.shape[0], representation.shape[1], self.num_similar_memories,
-                                           self.attributes[attribute]]) for attribute in self.attributes}
+                                           self.attributes[attribute]] if isinstance(self.attributes[attribute], int)
+                                          else [representation.shape[0], representation.shape[1],
+                                                self.num_similar_memories] + list(self.attributes[attribute]))
+                      for attribute in self.attributes}
 
         # Initialize duplicate (negative means no duplicate)
         duplicate = []
@@ -287,11 +327,11 @@ class Memories:
                 # Number of similar memories
                 num_similar_memories = min(self.length, self.num_similar_memories)
 
-                # If there are memories to draw from
-                if num_similar_memories > 0:
+                # If there are (enough) memories to draw from (changed from comparing to 0 and added self.tree check)
+                if num_similar_memories == self.num_similar_memories and self.tree is not None:
                     # If not all zero
                     if representation[batch_dim, time_dim].any():
-                        # Retrieve most similar memories TODO check if duplicate with distance == 0
+                        # Retrieve most similar memories
                         distances, indices = self.tree.query([representation[batch_dim, time_dim]],
                                                              k=min(self.num_similar_memories, self.length))
                         # dist = [np.ones(k), 0]
@@ -302,15 +342,26 @@ class Memories:
 
                         # Set remembered attributes
                         for attribute in self.attributes:
-                            remembered[attribute][batch_dim, time_dim] = np.expand_dims(
-                                self.memories[attribute][indices[0]], 1) if self.attributes[attribute] == 1 else \
-                                self.memories[attribute][indices[0]]
+                            if isinstance(self.attributes[attribute], int):  # TODO allow multi-dim
+                                remembered[attribute][batch_dim, time_dim] = np.expand_dims(
+                                    self.memories[attribute][indices[0]], 1) if self.attributes[attribute] == 1 else \
+                                    self.memories[attribute][indices[0]]
 
                         # Set time accessed
                         if "time_accessed" in self.attributes:
                             self.memories["time_accessed"][indices[0]] = perception_of_time
 
-        # Return remembered attributes
+        # # Attributes
+        # assert "representations" in remembered
+        # remembered_attributes = []
+        # if "attributes" not in remembered:
+        #     # remembered["attributes"] =
+        #     for attribute in remembered:
+        #         if attribute != "representation":
+        #             remembered_attributes.append(remembered[attribute])
+        # remembered_attributes = np.stack(remembered_attributes)
+
+        # Return remembered
         return remembered
 
     def represent(self, placeholders=None, do_partial_run=False):
@@ -319,7 +370,7 @@ class Memories:
 
     def expect(self, placeholders=None, do_partial_run=False):
         # Get memory
-        return self.brain.run(placeholders, do_partial_run=do_partial_run)
+        return self.brain.run(placeholders, "expectation", do_partial_run=do_partial_run)
 
     def consolidate(self, short_term_memories=None, leaf_size=400):
         # If there are short term memories available
@@ -356,12 +407,19 @@ class Memories:
         # Return memory
         return memory
 
+    def random_batch(self, batch_dim=32):
+        # Batch indices
+        indices = random.sample(range(self.length), min(batch_dim, self.length))
+
+        # Return batch
+        return {attribute: self.memories[attribute][indices] for attribute in self.attributes}
+
     def reset(self, population=None):
         # Reset internal states
         self.tree = None
         self.length = 0
 
-        # For each memory attribute
+        # For each memory attribute  TODO multi-dim memories
         for attribute, dimensionality in self.attributes.items():
             # If no population provided
             if population is None:
@@ -412,6 +470,7 @@ class Memories:
 class MFEC(Memories):
     def store(self, memory, check_duplicate=False):
         # Duplicate index (positive if exists)
+        check_duplicate = check_duplicate and not np.isnan(memory["duplicate"])
         duplicate_index = int(memory["duplicate"]) if check_duplicate else -1
 
         # If not a duplicate

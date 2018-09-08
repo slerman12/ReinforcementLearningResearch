@@ -40,6 +40,14 @@ class Brains:
             placeholders = {self.placeholders[key]: placeholders[key] for key in placeholders if key in
                             self.placeholders and self.placeholders[key] is not None}
 
+            # Last partial run
+            last_partial_run = False
+            if self.tensorflow_partial_run["last_fetch"] is not None:
+                if isinstance(components, dict) or isinstance(components, list):
+                    last_partial_run = self.tensorflow_partial_run["last_fetch"] in components
+                else:
+                    last_partial_run = self.tensorflow_partial_run["last_fetch"] == components
+
             # Graph component(s) to run
             if isinstance(components, dict):
                 components = {key: components[key] for key in components if components[key] is not None}
@@ -86,8 +94,15 @@ class Brains:
                     self.tensorflow_partial_run["partial_run"] = self.session.partial_run_setup(
                         fetches, list(self.tensorflow_partial_run["feeds"].values()))
 
-                # Return the result and the partially computed graph
-                return self.session.partial_run(self.tensorflow_partial_run["partial_run"], components, placeholders)
+                # Return the result for the partially computed graph
+                result = self.session.partial_run(self.tensorflow_partial_run["partial_run"], components, placeholders)
+
+                # If final component of partial run, reset
+                if last_partial_run:
+                    self.tensorflow_partial_run["partial_run"] = None
+
+                # Return
+                return result
             else:
                 # Return the regular run
                 return self.session.run(components, feed_dict=placeholders)
@@ -150,7 +165,7 @@ class FullyConnected(Brains):
             outputs = tf.einsum('aj,jk->ak', inputs, output_weights) + output_bias
 
         # Brain
-        self.placeholders["inputs"] = inputs
+        self.placeholders = {"inputs": inputs}
         self.brain = outputs
 
 

@@ -15,11 +15,11 @@ batch_dim = 32
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LifelongMemoryModel/testing"
+model_directory = "LifelongMemoryModel/testing3"
 
 # Data reader ["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"]
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"],
-                     train_test_split=0.8, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0)
+                     train_test_split=0.8, train_memory_split=0.15, valid_eval_split=1, sequence_dropout=0)
 
 # Validation data
 validation_data = reader.read(reader.validation_data)
@@ -39,14 +39,14 @@ brain_parameters = dict(input_dim=reader.input_dim, midstream_dim=128, max_time_
                         memory_closest_prediction_loss=False, context_memory_sum=True)
 
 # Attributes
-attributes = {"representations": brain_parameters["memory_embedding_dim"], "attributes": reader.desired_output_dim}
+attributes = {"representation": brain_parameters["memory_embedding_dim"], "target": reader.desired_output_dim}
 
 # Vision
 vision = Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters))
 
 # Agent memory
 agent_memory = Memories.Memories(capacity=reader.separate_time_dims(agent_memories["inputs"]).shape[0],
-                                 attributes=attributes, num_similar_memories=32)
+                                 attributes=attributes, num_similar_memories=64)
 
 # Validation memory
 validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0])
@@ -64,7 +64,7 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
                                       run_throughs_per_epoch=len(reader.training_data) // batch_dim,
                                       description=[brain_parameters,
                                                    "Sequence Dropout: {}, Train/Test Split: {}, Train/Memory Split: {},"
-                                                   " Num Similar Memories: {}".format(
+                                                   " Number of Similar Memories: {}".format(
                                                        reader.sequence_dropout, reader.train_test_split,
                                                        reader.train_memory_split, agent_memory.num_similar_memories)])
 
@@ -74,7 +74,7 @@ agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradi
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
                            logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
 
-# TensorFlow partial run
+# TensorFlow Partial Run
 agent.start_tensorflow_partial_run(["representation", agent.errors, agent.train])
 validate.start_tensorflow_partial_run(["representation", validate.errors])
 
@@ -90,16 +90,16 @@ if __name__ == "__main__":
         learning_rate = 0.0001
 
         # Reset memory -- every interval'th epoch
-        if performance.is_epoch(episode, interval=10):
+        if performance.is_epoch(episode, interval=1):
             # Populate memory with representations
             agent_memory.reset(
-                population={"representations": reader.separate_time_dims(validation_memory.represent(agent_memories)),
-                            "attributes": reader.separate_time_dims(data=agent_memories["desired_outputs"],
-                                                                    time_dims=agent_memories["time_dims"])})
+                population={"representation": reader.separate_time_dims(validation_memory.represent(agent_memories)),
+                            "target": reader.separate_time_dims(data=agent_memories["desired_outputs"],
+                                                                time_dims=agent_memories["time_dims"])})
             validation_memory.reset(
-                population={"representations": reader.separate_time_dims(validation_memory.represent(validation_memories)),
-                            "attributes": reader.separate_time_dims(data=validation_memories["desired_outputs"],
-                                                                    time_dims=validation_memories["time_dims"])})
+                population={"representation": reader.separate_time_dims(validation_memory.represent(validation_memories)),
+                            "target": reader.separate_time_dims(data=validation_memories["desired_outputs"],
+                                                                time_dims=validation_memories["time_dims"])})
 
             # Consolidate memories (build KD tree for them)
             agent_memory.consolidate()
@@ -112,8 +112,8 @@ if __name__ == "__main__":
         remembered = agent.remember({"inputs": inputs, "time_dims": time_dims, "time_ahead": time_ahead})
 
         # Train
-        agent_mse = agent.learn({"remembered_representations": remembered["representations"],
-                                 "remembered_attributes": remembered["attributes"],
+        agent_mse = agent.learn({"remembered_representations": remembered["representation"],
+                                 "remembered_attributes": remembered["target"],
                                  "desired_outputs": desired_outputs, "learning_rate": learning_rate})
 
         # Validation -- every interval'th epoch
@@ -125,8 +125,8 @@ if __name__ == "__main__":
                                             "time_ahead": validation_data["time_ahead"]})
 
             # Validate
-            validation_mse = validate.measure_errors({"remembered_representations": remembered["representations"],
-                                                      "remembered_attributes": remembered["attributes"],
+            validation_mse = validate.measure_errors({"remembered_representations": remembered["representation"],
+                                                      "remembered_attributes": remembered["target"],
                                                       "desired_outputs": validation_data["desired_outputs"]})
 
         # Measure performance
@@ -140,7 +140,7 @@ if __name__ == "__main__":
                                                             "Validation (MSE)": lambda x: x[-1]})
 
         # Save and re-shuffle -- every interval'th epoch
-        if performance.is_epoch(episode + 1, interval=10):
+        if performance.is_epoch(episode + 1, interval=1):
             # Save agent
             agent.save("{}/Saved/{}".format(path, model_directory))
 

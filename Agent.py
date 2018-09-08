@@ -7,7 +7,7 @@ import Brains
 
 class Agent:
     def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
-                 actions=None, exploration_rate=None, tensorflow=True, scope_name="training", session=None):
+                 exploration_rate=None, actions=None, tensorflow=True, scope_name="training", session=None):
         # Start timing (wall time)
         start_time = time.time()
 
@@ -23,9 +23,6 @@ class Agent:
 
         # Traces
         self.traces = traces
-
-        # Attributes (such as state, scene, reward, value, etc.)
-        self.attributes = attributes
 
         # Parameters
         self.actions = actions
@@ -100,7 +97,7 @@ class Agent:
             representation = self.long_term_memory.represent(query, do_partial_run=True)
 
         # Retrieve memories
-        remembered = self.long_term_memory.remember(representation, self.perception_of_time, time_dims)
+        remembered = self.long_term_memory.retrieve(representation, self.perception_of_time, time_dims)
 
         # Measure time
         self.timer = time.time() - start_time
@@ -123,7 +120,7 @@ class Agent:
             # If there are memories to draw from
             if num_similar_memories > 0:
                 # Similar memories
-                distances, indices = self.long_term_memory.remember(observation,
+                distances, indices = self.long_term_memory.retrieve(observation,
                                                                     self.long_term_memory.num_similar_memories)
 
                 # Weights
@@ -175,7 +172,7 @@ class Agent:
         # Measure time
         self.timer = time.time() - start_time
 
-    def learn(self, placeholders=None):
+    def learn(self, placeholders=None, learning_rate=None):
         # Start timing
         start_time = time.time()
 
@@ -183,6 +180,10 @@ class Agent:
         if placeholders is None:
             placeholders = {}
         errors = None
+
+        # Learning rate and desired outputs
+        if learning_rate is not None:
+            placeholders.update({"learning_rate": learning_rate})
 
         # Consolidate memories
         if self.long_term_memory is not None:
@@ -266,17 +267,17 @@ class Agent:
         # Move perception of time forward
         self.perception_of_time += time_quantum
 
-    def adapt(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
-              actions=None, exploration_rate=None, tensorflow=None, scope_name="adapted", session=None):
+    def adapt(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, actions=None,
+              exploration_rate=None, tensorflow=None, scope_name="adapted", session=None):
         # Bodies
         bodies = [self.vision, self.long_term_memory, self.short_term_memory, self.traces]
 
         # Genes
-        genes = [self.attributes, self.actions, self.exploration_rate, self.tensorflow, self.session]
+        genes = [self.actions, self.exploration_rate, self.tensorflow, self.session]
 
         # Mutations
         body_mutations = [vision, long_term_memory, short_term_memory, traces]
-        gene_mutations = [attributes, actions, exploration_rate, tensorflow, session]
+        gene_mutations = [actions, exploration_rate, tensorflow, session]
 
         # Default bodies
         for i, mutation in enumerate(body_mutations):
@@ -290,10 +291,9 @@ class Agent:
 
         # Return adapted agent
         return self.__class__(vision=body_mutations[0], long_term_memory=body_mutations[1],
-                              short_term_memory=body_mutations[2], traces=body_mutations[3],
-                              attributes=gene_mutations[0], actions=gene_mutations[1],
-                              exploration_rate=gene_mutations[2], tensorflow=gene_mutations[3],
-                              scope_name=scope_name, session=gene_mutations[4])
+                              short_term_memory=body_mutations[2], traces=body_mutations[3], actions=gene_mutations[0],
+                              exploration_rate=gene_mutations[1], tensorflow=gene_mutations[2],
+                              scope_name=scope_name, session=gene_mutations[3])
 
     def start_tensorflow(self):
         # Open scope, start brains (build graphs), and begin session
@@ -328,6 +328,8 @@ class Agent:
         # Assign session to brains
         for body in [self, self.vision, self.long_term_memory]:
             if body is not None:
+                if isinstance(body, list):
+                    body = body[0]
                 if body.brain is not None:
                     body.brain.session = self.session
 
@@ -372,7 +374,10 @@ class Agent:
     def start_tensorflow_partial_run(self, fetches, feeds=None):
         # Convert fetches to list if dict
         if isinstance(fetches, dict):
+            last_fetch = list(fetches.keys())[-1]
             fetches = list(fetches.values())
+        else:
+            last_fetch = fetches[-1]
 
         # Map strings in fetches to components
         for i, key in enumerate(fetches):
@@ -385,11 +390,19 @@ class Agent:
         # Default feeds
         if feeds is None:
             feeds = self.brain.placeholders
+        elif isinstance(feeds, list):
+            # Map strings in fetches to components
+            new_feeds = {}
+            for key in feeds:
+                if isinstance(key, str):
+                    new_feeds[key] = self.brain.placeholders[key]
+            feeds = new_feeds
 
         # Default no partial run setup
-        partial_run = {"fetches": fetches, "feeds": feeds, "partial_run": None, "special_fetches": None}
+        partial_run = {"fetches": fetches, "feeds": feeds, "partial_run": None, "special_fetches": None,
+                       "last_fetch": last_fetch}
 
-        # Account for irregularity of TensorBoard logging
+        # Account for irregularity of TensorBoard logging (still only works if logs are called according to schedule)
         if self.tensorboard_logs is not None:
             def is_tensorboard_logging():
                 learning_steps = self.brain.run(components=[self.learning_steps])
@@ -442,7 +455,7 @@ class MFEC(Agent):
             # If there are memories to draw from
             if num_similar_memories > 0:
                 # Similar memories
-                distances, indices = self.long_term_memory[action].remember(observation, self.k)
+                distances, indices = self.long_term_memory[action].retrieve(observation, self.k)
 
                 # For each similar memory
                 for i in range(num_similar_memories):
@@ -483,14 +496,14 @@ class MFEC(Agent):
         # Return the chosen action, the expected return value, and whether or not this experience happened before
         return self.actions[action], expected_per_action[action], duplicate[action]
 
-    def learn(self, placeholders=None, tensorboard_logs_scope_name=None):
+    def learn(self, placeholders=None, learning_rate=None):
         # Start timing
         start_time = time.time()
 
-        # Default variables
+        # Defaults
         if placeholders is None:
             placeholders = {}
-        loss = None
+        errors = None
 
         # Consolidate memories
         if self.long_term_memory is not None:
@@ -499,16 +512,39 @@ class MFEC(Agent):
 
         # Train brain
         if self.train is not None and self.tensorflow:
-            if tensorboard_logs_scope_name is None:
-                _, loss = self.brain.run(placeholders, [self.train, self.loss])
+            # Increment learning steps
+            learning_steps = self.brain.run(components=[self.increment_learning_steps])
+
+            # Fetches
+            fetches = {"train": self.train}
+
+            # Errors and logs
+            if self.errors is None:
+                fetches.update({"errors": self.loss})
             else:
-                _, loss, logs = self.brain.run(placeholders, [self.train, self.loss, tensorboard_logs_scope_name])
+                fetches.update({"errors": self.errors})
+            if self.tensorboard_logs is not None and (learning_steps - 1) % self.tensorboard_logging_interval == 0:
+                fetches.update({"logs": self.tensorboard_logs})
+
+            # Fetched
+            fetched = self.brain.run(placeholders, fetches)
+
+            # Errors
+            errors = fetched["errors"]
+
+            # Output TensorBoard logs
+            if self.tensorboard_logs is not None and (learning_steps - 1) % self.tensorboard_logging_interval == 0:
+                self.tensorboard_writer.add_summary(fetched["logs"], learning_steps)
+
+            # Reset partial run
+            if self.brain.tensorflow_partial_run is not None:
+                self.brain.tensorflow_partial_run["partial_run"] = None
 
         # Measure time
         self.timer = time.time() - start_time
 
         # Return loss
-        return loss
+        return errors
 
 
 class NEC(MFEC):
@@ -517,25 +553,31 @@ class NEC(MFEC):
         self.vision.start_brain()
         self.long_term_memory[0].start_brain(projection=self.vision.brain)
 
+        output_dim = self.long_term_memory[0].attributes[self.long_term_memory[0].target_attribute]
+
         # Desired outputs
-        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+        desired_outputs = tf.placeholder("float", [None, None, output_dim])
+        placeholders = {"desired_outputs": desired_outputs}
+        placeholders.update(self.long_term_memory[0].brain.placeholders)
 
         # Set brain for agent
-        self.brain = Brains.Brains(parameters={"output_dim": self.attributes["attributes"]},
-                                   placeholders={"desired_outputs": desired_outputs},
+        self.brain = Brains.Brains(parameters={"output_dim": output_dim},
+                                   placeholders=placeholders,
                                    components={"vision": self.vision.brain.brain,
                                                "representation":
                                                    self.long_term_memory[0].brain.components["representation"],
                                                "expectation": self.long_term_memory[0].brain.brain},
                                    brain=self.long_term_memory[0].brain.brain)
 
-        # Mask for canceling out padding in dynamic sequences
-        mask = tf.squeeze(self.brain.components["mask"])
-        mask_normalizer = tf.reduce_sum(mask, 1)
+        self.loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs))
+
+        # # Mask for canceling out padding in dynamic sequences
+        # mask = tf.squeeze(self.brain.components["mask"])
+        # mask_normalizer = tf.reduce_sum(mask, 1)
 
         # Mean squared difference for brain output
-        self.loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
-        self.loss = tf.reduce_mean(tf.reduce_sum(self.loss * mask, 1) / mask_normalizer)
+        # self.loss = tf.reduce_mean(tf.squared_difference(self.brain.brain, desired_outputs), 2)
+        # self.loss = tf.reduce_mean(tf.reduce_sum(self.loss * mask, 1) / mask_normalizer)
 
         # If training
         if self.scope_name == "training":
@@ -573,8 +615,7 @@ class NEC(MFEC):
         explore = np.random.choice(np.arange(2), p=[1 - self.exploration_rate, self.exploration_rate])
 
         # Choose best action or explore
-        action = np.random.choice(np.arange(self.actions.size)) if explore else np.argmax([memory["expected"]
-                                                                                           for memory in observation])
+        action = np.random.choice(np.arange(self.actions.size)) if explore else np.argmax([observation])
 
         # Measure time
         self.timer = time.time() - start_time
@@ -801,10 +842,11 @@ class LifelongMemory(Agent):
 
         # Parameters
         parameters.update(self.vision.brain.parameters)
-        parameters.update({"vision_output_dim": parameters["output_dim"], "output_dim": self.attributes["attributes"]})
+        parameters.update({"vision_output_dim": parameters["output_dim"],
+                           "output_dim": self.long_term_memory.attributes[self.long_term_memory.target_attribute]})
 
         # Desired outputs
-        desired_outputs = tf.placeholder("float", [None, None, self.attributes["attributes"]])
+        desired_outputs = tf.placeholder("float", [None, None, parameters["output_dim"]])
 
         # Placeholders
         placeholders.update(self.vision.brain.placeholders)
