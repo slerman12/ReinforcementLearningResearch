@@ -44,7 +44,8 @@ class Brains:
             last_partial_run = False
             if self.tensorflow_partial_run["last_fetch"] is not None:
                 if isinstance(components, dict) or isinstance(components, list):
-                    last_partial_run = self.tensorflow_partial_run["last_fetch"] in components
+                    if not isinstance(self.tensorflow_partial_run["last_fetch"], list):
+                        last_partial_run = self.tensorflow_partial_run["last_fetch"] in components
                 else:
                     last_partial_run = self.tensorflow_partial_run["last_fetch"] == components
 
