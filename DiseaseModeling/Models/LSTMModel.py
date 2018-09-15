@@ -14,7 +14,7 @@ path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseMo
 model_directory = "LSTMModel/time_ahead_downstream_with_dropout_0.2_0_0.65"
 
 # Data reader
-reader = Data.ReadPD("Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"],
+reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"],
                      train_test_split=0.8, valid_eval_split=1, sequence_dropout=0)
 
 # Brain parameters

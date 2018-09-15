@@ -51,7 +51,7 @@ class ReadPD:
         patients = list(file["PATNO"].unique())
 
         # Shuffle patients
-        random.Random().shuffle(patients)
+        random.Random(10).shuffle(patients)
 
         # Split training sets
         self.training_memory_data_patients = list(patients[:round(self.train_test_split * len(patients))])

@@ -42,12 +42,13 @@ class Brains:
 
             # Last partial run
             last_partial_run = False
-            if self.tensorflow_partial_run["last_fetch"] is not None:
-                if isinstance(components, dict) or isinstance(components, list):
-                    if not isinstance(self.tensorflow_partial_run["last_fetch"], list):
-                        last_partial_run = self.tensorflow_partial_run["last_fetch"] in components
-                else:
-                    last_partial_run = self.tensorflow_partial_run["last_fetch"] == components
+            if self.tensorflow_partial_run is not None:
+                if self.tensorflow_partial_run["last_fetch"] is not None:
+                    if isinstance(components, dict) or isinstance(components, list):
+                        if not isinstance(self.tensorflow_partial_run["last_fetch"], list):
+                            last_partial_run = self.tensorflow_partial_run["last_fetch"] in components
+                    else:
+                        last_partial_run = self.tensorflow_partial_run["last_fetch"] == components
 
             # Graph component(s) to run
             if isinstance(components, dict):

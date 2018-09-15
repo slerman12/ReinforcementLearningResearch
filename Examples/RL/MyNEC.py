@@ -40,7 +40,7 @@ learning_rate = 0.0001
 # Brain parameters
 brain_parameters = dict(input_dim=state_dim, output_dim=10, max_gradient_clip_norm=5)
 
-# Attributes
+# Memory attributes
 memory_attributes = dict(representation=representation_dim, action=1, reward=1, expectation=1, duplicate=1, terminal=1,
                          time_accessed=1, value=1)
 
@@ -52,7 +52,7 @@ experience_replay_attributes = dict(state=state_dim, value=1, time_accessed=1,
 # Vision
 vision = Vision.Vision(brain=Brains.FullyConnected(brain_parameters))
 
-# Memories
+# Memories TODO replace target attribute with parameters for all start_brains when re-implementing brains
 long_term_memory = [Memories.MFEC(capacity=memory_length, attributes=memory_attributes, target_attribute="value",
                                   num_similar_memories=num_similar_memories) for _ in actions]
 short_term_memory = [Memories.MFEC(capacity=max_episode_length, attributes=memory_attributes) for _ in actions]
