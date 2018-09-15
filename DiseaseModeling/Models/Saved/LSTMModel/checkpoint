@@ -1,0 +1,2 @@
+model_checkpoint_path: "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models/Saved/LSTMModel/time_ahead_downstream_with_dropout_0.2_0_0.65"
+all_model_checkpoint_paths: "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models/Saved/LSTMModel/time_ahead_downstream_with_dropout_0.2_0_0.65"
