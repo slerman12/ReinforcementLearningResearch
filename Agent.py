@@ -28,7 +28,7 @@ class Agent:
         self.actions = actions
         self.exploration_rate = exploration_rate
 
-        # Brain defaults
+        # Brain defaults TODO change errors to metrics
         self.brain = self.loss = self.errors = self.train = self.accuracy = \
             self.learning_steps = self.increment_learning_steps = self.gradients = self.variables = \
             self.tensorflow_saver = self.tensorboard_logging_interval = \
@@ -192,7 +192,7 @@ class Agent:
         # Train brain
         if self.train is not None and self.tensorflow:
             # Increment learning steps
-            learning_steps = self.brain.run(components=[self.increment_learning_steps])
+            learning_steps = self.brain.run(out_projections=[self.increment_learning_steps])
 
             # Fetches
             fetches = {"train": self.train}
@@ -230,7 +230,7 @@ class Agent:
         start_time = time.time()
 
         # Learning steps
-        learning_steps = self.brain.run(components=[self.learning_steps])
+        learning_steps = self.brain.run(out_projections=[self.learning_steps])
 
         # Fetches
         fetches = {}
@@ -405,7 +405,7 @@ class Agent:
         # Account for irregularity of TensorBoard logging (still only works if logs are called according to schedule)
         if self.tensorboard_logs is not None:
             def is_tensorboard_logging():
-                learning_steps = self.brain.run(components=[self.learning_steps])
+                learning_steps = self.brain.run(out_projections=[self.learning_steps])
                 return learning_steps % self.tensorboard_logging_interval == 0
 
             partial_run["special_fetches"] = [[self.tensorboard_logs], is_tensorboard_logging]
@@ -513,7 +513,7 @@ class MFEC(Agent):
         # Train brain
         if self.train is not None and self.tensorflow:
             # Increment learning steps
-            learning_steps = self.brain.run(components=[self.increment_learning_steps])
+            learning_steps = self.brain.run(out_projections=[self.increment_learning_steps])
 
             # Fetches
             fetches = {"train": self.train}
