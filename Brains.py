@@ -1,19 +1,23 @@
 import tensorflow as tf
+from copy import deepcopy
 
 
 class Brains:
-    def __init__(self, parameters=None, brain=None, placeholders=None, components=None, tensorflow=True, session=None):
-        # Initialize brain 
-        self.brain = brain
+    def __init__(self, stream_methods=None, projections=None, parameters=None, tensorflow=True, session=None):
+        # Stream
+        self.stream = {}
 
-        # Set parameters
-        self.parameters = parameters
+        # Final stream projection
+        self.stream_projection = None
 
-        # Initialize graph placeholders
-        self.placeholders = placeholders
+        # Projection name
+        self.stream_projection_name = None
 
-        # Initialize graph components
-        self.components = components
+        # All projections in stream
+        self.projections = {}
+
+        # Start brain with add_to_stream
+        self.add_to_stream(stream_methods, projections, parameters)
 
         # If using TensorFlow
         self.tensorflow = tensorflow
@@ -24,51 +28,53 @@ class Brains:
         # Initialize session
         self.session = session
 
-    def run(self, placeholders=None, components=None, do_partial_run=False):
+    def run(self, projections=None, out_projections=None, do_partial_run=False):
         # If TensorFlow
         if self.tensorflow:
-            # Default placeholders
-            if not isinstance(placeholders, dict):
-                placeholders = {} if placeholders is None else {"inputs": placeholders}
+            # TODO: if projection not started, build it
+            # Default projections
+            if not isinstance(projections, dict):
+                projections = {} if projections is None else {"inputs": projections}
 
-            # Graph placeholders to use
+            # Projections to use
             if do_partial_run and self.tensorflow_partial_run is not None:
-                placeholders = {key: placeholders[key] for key in placeholders
-                                if key in self.tensorflow_partial_run["feeds"]}
+                projections = {key: projections[key] for key in projections
+                               if key in self.tensorflow_partial_run["feeds"]}
 
-            # Graph placeholders to use
-            placeholders = {self.placeholders[key]: placeholders[key] for key in placeholders if key in
-                            self.placeholders and self.placeholders[key] is not None}
+            # Projections to use
+            projections = {self.projections[key]: projections[key] for key in projections if key in
+                           self.projections and self.build(key) is not None}
 
             # Last partial run
             last_partial_run = False
             if self.tensorflow_partial_run is not None:
                 if self.tensorflow_partial_run["last_fetch"] is not None:
-                    if isinstance(components, dict) or isinstance(components, list):
+                    if isinstance(out_projections, dict) or isinstance(out_projections, list):
                         if not isinstance(self.tensorflow_partial_run["last_fetch"], list):
-                            last_partial_run = self.tensorflow_partial_run["last_fetch"] in components
+                            last_partial_run = self.tensorflow_partial_run["last_fetch"] in out_projections
                     else:
-                        last_partial_run = self.tensorflow_partial_run["last_fetch"] == components
+                        last_partial_run = self.tensorflow_partial_run["last_fetch"] == out_projections
 
-            # Graph component(s) to run
-            if isinstance(components, dict):
-                components = {key: components[key] for key in components if components[key] is not None}
-            if components is None:
-                components = [self.brain]
-            elif isinstance(components, str):
-                components = [self.components[components]]
-            elif isinstance(components, list):
-                for i, component in enumerate(components):
+            # Stream projections to run
+            if isinstance(out_projections, dict):
+                out_projections = {key: out_projections[key] for key in out_projections
+                                   if out_projections[key] is not None}
+            if out_projections is None:
+                out_projections = [self.stream_projection]
+            elif isinstance(out_projections, str):
+                out_projections = [self.projections[out_projections]]
+            elif isinstance(out_projections, list):
+                for i, component in enumerate(out_projections):
                     if isinstance(component, str):
-                        components[i] = self.components[component]
+                        out_projections[i] = self.projections[component]
             else:
-                components = [components]
-            components = [component for component in components if component is not None]
+                out_projections = [out_projections]
+            out_projections = [component for component in out_projections if component is not None]
 
             # Output single element if components is a single item list
-            if isinstance(components, list):
-                if len(components) == 1:
-                    components = components[0]
+            if isinstance(out_projections, list):
+                if len(out_projections) == 1:
+                    out_projections = out_projections[0]
 
             # If doing a partial run
             if do_partial_run and self.tensorflow_partial_run is not None:
@@ -79,10 +85,10 @@ class Brains:
                     self.tensorflow_partial_run["fetches"] = [fetch for fetch in self.tensorflow_partial_run["fetches"]
                                                               if fetch is not None]
 
-                    # Map strings in fetches to components
+                    # Map strings in fetches to stream projections
                     for i, key in enumerate(self.tensorflow_partial_run["fetches"]):
                         if isinstance(key, str):
-                            self.tensorflow_partial_run["fetches"][i] = self.components[key]
+                            self.tensorflow_partial_run["fetches"][i] = self.projections[key]
 
                     # Fetches
                     fetches = self.tensorflow_partial_run["fetches"]
@@ -97,9 +103,9 @@ class Brains:
                         fetches, list(self.tensorflow_partial_run["feeds"].values()))
 
                 # Return the result for the partially computed graph
-                result = self.session.partial_run(self.tensorflow_partial_run["partial_run"], components, placeholders)
+                result = self.session.partial_run(self.tensorflow_partial_run["partial_run"], out_projections, projections)
 
-                # If final component of partial run, reset
+                # If final stream projection of partial run, reset
                 if last_partial_run:
                     self.tensorflow_partial_run["partial_run"] = None
 
@@ -107,443 +113,298 @@ class Brains:
                 return result
             else:
                 # Return the regular run
-                return self.session.run(components, feed_dict=placeholders)
+                return self.session.run(out_projections, feed_dict=projections)
 
-    def build(self):
-        pass
+    def build(self, out_projection=None, projections=None, name_scope=None, variable_scope=None, update_stream=False):
+        # Stream projection to build
+        if out_projection is None:
+            out_projection = self.stream_projection_name
+        elif isinstance(out_projection, function):
+            out_projection = out_projection.__name__
 
-    def adapt(self, parameters=None, placeholders=None, components=None, tensorflow=None, session=None):
-        # Default mutations
-        if parameters is None:
-            parameters = {}
-        if placeholders is None:
-            placeholders = {}
-        if components is None:
-            components = {}
-        if tensorflow is None:
-            tensorflow = self.tensorflow
-        if session is None:
-            session = self.session
+        # Name scope
+        with optional_name_scope(name_scope if self.tensorflow else None):
+            # If building a stream method whose projections might need to be replaced TODO: ideally, track dependencies
+            if out_projection in self.stream and projections:
+                # Projections to pass into the stream method
+                stream_method_projections = {}
 
-        # Initialize adaptations
-        adapted_parameters = parameters
-        adapted_placeholders = placeholders
-        adapted_components = components
+                # Convert unique projection name to list
+                if not isinstance(projections, list) and not isinstance(projections, dict):
+                    projections = [projections]
 
-        # Brain genes mutated
-        if self.parameters is not None:
-            adapted_parameters = dict(self.parameters)
-            adapted_parameters.update(parameters)
-        if self.placeholders is not None:
-            adapted_placeholders = dict(self.placeholders)
-            adapted_placeholders.update(placeholders)
-        if self.components is not None:
-            adapted_components = dict(self.components)
-            adapted_components.update(components)
+                # Convert list of projection names to dict
+                if isinstance(projections, list):
+                    projections_dict = {}
+                    for projection in projections:
+                        if isinstance(projection, function):
+                            projection = projection.__name__
+                        projections_dict[projection] = projection
+                    projections = projections_dict
+
+                # Run upstream using passed in projections
+                for projection in self.stream[out_projection]["projections"]:
+                    # Use passed in projections
+                    if projection in projections:
+                        # Update stream
+                        if update_stream:
+                            self.projections[projection] = projections[projection]
+
+                        # Convert string to projection
+                        if isinstance(projections[projection], str):
+                            projections[projection] = self.build(projections[projection], projections)
+
+                        # Replace
+                        stream_method_projections[projection] = projections[projection]
+
+                        # Assumes unique and prunes; faster, but comment out if methods reuse the same projection
+                        # del projections[projection]
+                    else:
+                        stream_method_projections[projection] = self.build(projection, projections)
+
+                # Stream method projection (Note: does scoping work with recursion?)
+                with tf.variable_scope(self.stream[out_projection]["variable_scope"] if variable_scope is None
+                                       else variable_scope, reuse=tf.AUTO_REUSE):
+                    stream_method_projection = self.stream[out_projection]["method"](stream_method_projections,
+                                                                                     self.stream[out_projection]
+                                                                                     ["parameters"])
+
+                # Update stream
+                if update_stream:
+                    if not isinstance(self.projections[out_projection], str):
+                        self.projections[out_projection] = stream_method_projection
+
+                # Return stream method projection
+                return stream_method_projection
+
+            # In case no projections to replace, but stream method being built still has to be started
+            if self.projections[out_projection] is None and out_projection in self.stream:
+                stream_method_projections = {}
+                for projection in self.stream[out_projection]["projections"]:
+                    # Stream method projections
+                    stream_method_projections[projection] = self.build(projection, projections)
+
+                    # Update stream
+                    if update_stream:
+                        if not isinstance(self.projections[projection], str):
+                            self.projections[projection] = stream_method_projections[projection]
+
+                # Stream method projection
+                with tf.variable_scope(self.stream[out_projection]["variable_scope"] if variable_scope is None
+                                       else variable_scope, reuse=tf.AUTO_REUSE):
+                    stream_method_projection = self.stream[out_projection]["method"](stream_method_projections,
+                                                                                     self.stream[out_projection]
+                                                                                     ["parameters"])
+                # Update stream
+                if update_stream:
+                    self.projections[out_projection] = stream_method_projection
+
+                # Return stream method projection
+                return stream_method_projection
+
+            # Account for a string reference to another projection
+            if isinstance(self.projections[out_projection], str):
+                # Return reference projection
+                return self.build(self.projections[out_projection], projections)
+
+            # Return projection
+            return self.projections[out_projection]
+
+    def add_to_stream(self, stream_methods=None, projections=None, parameters=None, name_scope=None,
+                      variable_scope=None, use_stream_projection=True, start=True):
+        # Nothing to do
+        if not stream_methods and not projections:
+            return
+
+        # Default projections
+        if not projections:
+            projections = []
+
+        # Convert unique item to list
+        if not isinstance(projections, list):
+            projections = [projections]
+
+        # If using stream projection, add to projections
+        if use_stream_projection:
+            if self.stream_projection_name:
+                projections.append(self.stream_projection_name)
+
+        # Initialize dict of projections to pass into the stream method
+        stream_method_projections = {}
+
+        # Build the stream method projections using passed in projections
+        for projection in projections:
+            # If a projection name
+            if isinstance(projection, str):
+                # Use projection
+                stream_method_projections[projection] = self.build(projection)
+
+            # If a dict of projections
+            if isinstance(projection, dict):
+                # Store definition and add to stream method
+                for key in projection:
+                    # Verify distinct
+                    assert key not in self.projections
+
+                    # Shapes to placeholders
+                    if isinstance(projection[key], (list, tuple)):
+                        # If starting and all values of list are integers
+                        if start and all(isinstance(value, int) for value in projection[key]):
+                            # Use placeholder
+                            projection[key] = tf.placeholder("float", list(projection[key]))
+
+                        # Store definition (Note: can be a list of anything except integers)
+                        self.projections[key] = projection[key]
+
+                    # Names to projections
+                    elif isinstance(projection[key], str):
+                        # Store reference
+                        self.projections[key] = projection[key]
+
+                        # Use projection
+                        projection[key] = self.build(projection[key])
+
+                    # Brains to projections
+                    elif isinstance(projection[key], Brains):
+                        # Store reference
+                        self.projections[key] = projection[key].stream_projection_name
+
+                        # Copy over brain definitions
+                        self.stream += projection[key].stream
+                        assert not set(projection[key].projections.keys()) & set(self.projections.keys())
+                        self.projections.update(projection[key].projections)
+
+                        # Use brain's stream projection
+                        projection[key] = projection[key].stream_projection
+
+                    # If projection passed in
+                    else:
+                        # Store definition (Note: can be anything except list, string, or brain)
+                        self.projections[key] = projection[key]
+
+                    # Add to stream method
+                    stream_method_projections[key] = projection[key]
+
+            # If a brain
+            if isinstance(projection, Brains):
+                # Copy over brain definitions
+                self.stream += projection.stream
+                assert not set(projection.projections.keys()) & set(self.projections.keys())
+                self.projections.update(projection.projections)
+
+                # Use brain's stream projection
+                stream_method_projections[projection.stream_projection_name] = projection.stream_projection
+
+        # If no stream methods passed in
+        if not stream_methods:
+            return
+
+        # Convert to list
+        if not isinstance(stream_methods, list):
+            stream_methods = [stream_methods]
+
+        # Name scope
+        with optional_name_scope(name_scope if self.tensorflow else None):
+            # Add to stream
+            for stream_method in stream_methods:
+                # Convert everything to standard list of dicts with name: method
+                if not isinstance(stream_method, dict):
+                    if isinstance(stream_method, function):
+                        stream_method = {stream_method.__name__: stream_method}
+                        assert stream_method.__name__ not in self.projections
+                    if isinstance(stream_method, Brains):
+                        stream_method = {stream_method.stream_projection_name: stream_method}
+
+                # For each dict item
+                for name in stream_method:
+                    # If brain
+                    if isinstance(stream_method[name], Brains):
+                        # Copy over projection definitions
+                        for projection in stream_method[name].projections:
+                            if projection not in stream_method_projections:
+                                assert projection not in self.projections
+                                self.projections[projection] = stream_method[name].projections[projection] \
+                                    if isinstance(stream_method[name].projections[projection], str) else None
+
+                        # Copy over stream definition
+                        self.stream += stream_method[name].stream
+
+                        # Store stream definition
+                        if name != stream_method[name].stream_projection_name:
+                            assert name not in self.projections
+                            self.projections[name] = stream_method[name].stream_projection_name
+
+                        # Store stream projections definition
+                        self.projections[name] = self.build(name, update_stream=True) if start else None
+
+                    # If method
+                    if isinstance(stream_method[name], function):
+                        # Store stream definition
+                        self.stream[name] = {"method": stream_method[name],
+                                             "projections": list(stream_method_projections.keys()),
+                                             "parameters": parameters,
+                                             "name_scope": name_scope,
+                                             "variable_scope": variable_scope}
+
+                        # Store stream projections definition
+                        if self.tensorflow and start:
+                            with tf.variable_scope(name if name_scope is None else name_scope, reuse=tf.AUTO_REUSE):
+                                self.projections[name] = self.stream[name]["method"](projections, parameters)
+                        elif start:
+                            self.projections[name] = self.stream[name]["method"](projections, parameters)
+                        else:
+                            self.projections[name] = None
+
+                    # Assign stream projection
+                    self.stream_projection_name = name
+                    self.stream_projection = self.projections[name]
+
+                    # Pass this projection into the next stream method
+                    stream_method_projections = {self.stream_projection_name: self.stream_projection}
+
+    def adapt(self, stream_projections=None, projections=None, tensorflow=None, session=None, in_place=False):
+        # Adapted brain TODO: allow changing which projection names are in stream method and the saved class projections
+        adapted_brain = self if in_place else deepcopy(self)
+
+        # TensorFlow
+        if tensorflow is not None:
+            adapted_brain.tensorflow = tensorflow
+
+        # Session
+        if session is not None:
+            adapted_brain.session = session
+
+        # Update stream
+        if stream_projections is None:
+            adapted_brain.build(projections=projections, update_stream=True)
+        else:
+            if isinstance(stream_projections, list):
+                for stream_projection in stream_projections:
+                    adapted_brain.build(stream_projection, projections, update_stream=True)
+
+                adapted_brain.stream_projection_name = stream_projections[0]
+            if isinstance(stream_projections, str):
+                adapted_brain.build(stream_projections, projections, update_stream=True)
+            adapted_brain.stream_projection = adapted_brain.projections[adapted_brain.stream_projection_name]
 
         # Return adapted brain
-        return self.__class__(adapted_parameters, None, adapted_placeholders, adapted_components, tensorflow, session)
+        return adapted_brain
 
 
-class FullyConnected(Brains):
-    def build(self):
-        # Inputs
-        if "time_dims" in self.parameters or "max_time_dim" in self.parameters:
-            inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        else:
-            inputs = tf.placeholder("float", [None, self.parameters["input_dim"]])
+class Scope:
+    def __init__(self):
+        pass
 
-        # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [self.parameters["input_dim"],
-                                                            self.parameters["output_dim"]])
+    def __enter__(self):
+        pass
 
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.parameters["output_dim"]])
+    def __exit__(self, arg1, arg2, arg3):
+        pass
 
-        # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
-        if "time_dims" in self.parameters or "max_time_dim" in self.parameters:
-            outputs = tf.einsum('aij,jk->aik', inputs, output_weights) + output_bias
-        else:
-            outputs = tf.einsum('aj,jk->ak', inputs, output_weights) + output_bias
 
-        # Brain
-        self.placeholders = {"inputs": inputs}
-        self.brain = outputs
+def optional_variable_scope(scope, reuse=None):
+    return Scope() if scope is None else tf.variable_scope(scope, reuse=reuse)
 
 
-# An LSTM whose output is its last time step's output only
-class LSTMOutputLast(Brains):
-    def build(self):
-        # Graph placeholders
-        inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        desired_outputs = tf.placeholder("float", [None, self.parameters["output_dim"]])
-        time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
-        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "time_dims": time_dims,
-                             "learning_rate": tf.placeholder(tf.float32, shape=[])}
-
-        # Dropout
-        if "dropout" in self.parameters:
-            inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"])
-
-        # Transpose to time_dim x batch_dim x input_dim
-        inputs = tf.transpose(inputs, [1, 0, 2])
-
-        # Layer of LSTM cells
-        lstm_layer = tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"])
-
-        # Outputs and states of lstm layer
-        outputs, states = lstm_layer(inputs, dtype=tf.float32, time_dims=time_dims)
-
-        # Dropout
-        if "dropout" in self.parameters:
-            outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"])
-
-        # Index output of each lstm cell at the last time dimension (accounting for dynamic numbers of time dimensions)
-        outputs = tf.gather_nd(tf.stack(outputs), tf.stack([time_dims - 1, tf.range(tf.shape(outputs)[1])], 1)) \
-            if "max_time_dim" in self.parameters else outputs[-1]
-
-        # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [self.parameters["hidden_dim"],
-                                                            self.parameters["output_dim"]])
-
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.parameters["output_dim"]])
-
-        # Logits
-        outputs = tf.matmul(outputs, output_weights) + output_bias
-
-        # Components
-        self.components = {"outputs": outputs}
-
-        # Brain
-        self.brain = self.components["outputs"]
-
-
-class LSTM(Brains):
-    def build(self):
-        # Graph placeholders
-        inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        desired_outputs = tf.placeholder("float", [None, None, self.parameters["output_dim"]])
-        time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
-        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "time_dims": time_dims,
-                             "learning_rate": tf.placeholder(tf.float32, shape=[])}
-
-        # Default cell mode ("basic", "block", "cudnn") and number of layers
-        mode = self.parameters["mode"] if "mode" in self.parameters else "block"
-        num_layers = self.parameters["num_layers"] if "num_layers" in self.parameters else 1
-
-        # Dropout
-        if "dropout" in self.parameters:
-            inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"][0])
-
-        # Layers of LSTM cells
-        if mode == "cudnn":
-            # Transpose inputs to time_dim x batch_dim x input_dim
-            inputs = tf.transpose(inputs, [1, 0, 2])
-
-            # Layers of lstm cells
-            lstm_layers = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers=num_layers, num_units=self.parameters["hidden_dim"],
-                                                         dropout=self.parameters["dropout"][1])
-
-            # Initial state
-            initial_state = (tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["hidden_dim"]], tf.float32),
-                             tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["hidden_dim"]], tf.float32))
-            self.placeholders["initial_state"] = initial_state
-
-            # Outputs and states of lstm layers
-            outputs, final_states = lstm_layers(inputs, initial_state)
-
-            # Transpose outputs into batch_dim x time_dim x output_dim
-            outputs = tf.transpose(outputs, [1, 0, 2])
-
-            # Dropout
-            if "dropout" in self.parameters:
-                outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"][2])
-        elif mode == "fused":
-            # Transpose inputs to time_dim x batch_dim x input_dim
-            inputs = tf.transpose(inputs, [1, 0, 2])
-
-            # Initialize layers, states, and outputs
-            layers = []
-            initial_states = [(tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32),
-                               tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32))
-                              for _ in range(num_layers)]
-            outputs = inputs
-            final_states = []
-
-            # Feed one layer into the next
-            for layer in range(num_layers):
-                layers.append(tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"]))
-                outputs, final_state = layers[-1](outputs, initial_states[layer], tf.float32, time_dims)
-                final_states.append(final_state)
-
-                # Dropout
-                if "dropout" in self.parameters:
-                    outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"][1 if layer + 1 <
-                                                                                                   num_layers else 2])
-
-            # Transpose outputs into batch_dim x time_dim x output_dim
-            outputs = tf.transpose(outputs, [1, 0, 2])
-        else:
-            # Dropout
-            if "dropout" in self.parameters:
-                lstm_layers = tf.contrib.rnn.MultiRNNCell(
-                    [tf.contrib.rnn.DropoutWrapper(
-                        tf.contrib.rnn.BasicLSTMCell(self.parameters["hidden_dim"]) if mode == "basic"
-                        else tf.contrib.rnn.LSTMBlockCell(self.parameters["hidden_dim"]),
-                        output_keep_prob=1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2])
-                        for layer in range(num_layers)])
-            else:
-                # Layers of lstm cells
-                lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(self.parameters["hidden_dim"])
-                                                           if mode == "basic" else
-                                                           tf.contrib.rnn.LSTMBlockCell(self.parameters["hidden_dim"])
-                                                           for _ in range(num_layers)])
-
-            # Initial state
-            initial_state = lstm_layers.zero_state(self.parameters["batch_dim"], tf.float32)
-            self.placeholders["initial_state"] = initial_state
-
-            # Outputs and states of lstm layers
-            outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, initial_state)
-
-        # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [self.parameters["hidden_dim"],
-                                                            self.parameters["output_dim"]])
-
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.parameters["output_dim"]])
-
-        # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
-        outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
-
-        # Components
-        self.components = {"outputs": outputs, "final_state": final_states}
-
-        # Brain
-        self.brain = self.components["outputs"]
-
-
-class BidirectionalLSTM(Brains):
-    def build(self):
-        # Graph placeholders
-        inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        desired_outputs = tf.placeholder("float", [None, None, self.parameters["output_dim"]])
-        time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
-        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "time_dims": time_dims,
-                             "learning_rate": tf.placeholder(tf.float32, shape=[])}
-
-        # Dropout
-        if "dropout" in self.parameters:
-            inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"][0])
-
-        # Layer of bidirectional LSTM
-        cells = [tf.contrib.rnn.LSTMBlockCell(self.parameters["hidden_dim"]) for _ in range(2)]
-
-        # Initial state
-        initial_state = [cell.zero_state(self.parameters["batch_dim"], tf.float32) for cell in cells]
-        self.placeholders["initial_state"] = initial_state
-
-        # Outputs and states of lstm layers
-        outputs, h1, h2 = tf.contrib.rnn.stack_bidirectional_dynamic_rnn([cells[0]], [cells[1]], inputs,
-                                                                         [initial_state[0]], [initial_state[1]],
-                                                                         tf.float32, time_dims)
-
-        # Final states
-        final_states = [h1, h2]
-
-        # Dropout
-        if "dropout" in self.parameters:
-            outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"][2])
-
-        # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [self.parameters["hidden_dim"] * 2,
-                                                            self.parameters["output_dim"]])
-
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.parameters["output_dim"]])
-
-        # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
-        outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
-
-        # Components
-        self.components = {"outputs": outputs, "final_state": final_states}
-
-        # Brain
-        self.brain = self.components["outputs"]
-
-
-class PD_LSTM_Model(Brains):
-    def build(self):
-        # Graph placeholders
-        inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        desired_outputs = tf.placeholder("float", [None, None, self.parameters["output_dim"]])
-        time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
-        time_ahead = tf.placeholder("float", [None, None])
-        self.placeholders = {"inputs": inputs, "desired_outputs": desired_outputs, "time_dims": time_dims,
-                             "time_ahead": time_ahead, "learning_rate": tf.placeholder(tf.float32, shape=[])}
-
-        # Default cell mode ("basic", "block", "cudnn") and number of layers
-        mode = self.parameters["mode"] if "mode" in self.parameters else "block"
-        num_layers = self.parameters["num_layers"] if "num_layers" in self.parameters else 1
-
-        # Dropout
-        if "dropout" in self.parameters:
-            inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"][0])
-
-        # Add time ahead before lstm layer
-        if "time_ahead_upstream" in self.parameters:
-            if self.parameters["time_ahead_upstream"]:
-                inputs = tf.concat([inputs, tf.expand_dims(time_ahead, 2)], 2)
-
-        # Layers of LSTM cells
-        if mode == "cudnn":
-            # Transpose inputs to time_dim x batch_dim x input_dim
-            inputs = tf.transpose(inputs, [1, 0, 2])
-
-            # Layers of lstm cells
-            lstm_layers = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers=num_layers, num_units=self.parameters["hidden_dim"],
-                                                         dropout=self.parameters["dropout"][1])
-
-            # Initial state
-            initial_state = (tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["hidden_dim"]], tf.float32),
-                             tf.zeros([num_layers, self.parameters["batch_dim"],
-                                       self.parameters["hidden_dim"]], tf.float32))
-            self.placeholders["initial_state"] = initial_state
-
-            # Outputs and states of lstm layers
-            outputs, final_states = lstm_layers(inputs, initial_state)
-
-            # Transpose outputs into batch_dim x time_dim x output_dim
-            outputs = tf.transpose(outputs, [1, 0, 2])
-
-            # Dropout
-            if "dropout" in self.parameters:
-                outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"][2])
-        elif mode == "fused":
-            # Transpose inputs to time_dim x batch_dim x input_dim
-            inputs = tf.transpose(inputs, [1, 0, 2])
-
-            # Initialize layers, states, and outputs
-            layers = []
-            initial_states = [(tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32),
-                               tf.zeros([self.parameters["batch_dim"], self.parameters["hidden_dim"]], tf.float32))
-                              for _ in range(num_layers)]
-            outputs = inputs
-            final_states = []
-
-            # Feed one layer into the next
-            for layer in range(num_layers):
-                layers.append(tf.contrib.rnn.LSTMBlockFusedCell(self.parameters["hidden_dim"]))
-                outputs, final_state = layers[-1](outputs, initial_states[layer], tf.float32, time_dims)
-                final_states.append(final_state)
-
-                # Dropout
-                if "dropout" in self.parameters:
-                    outputs = tf.nn.dropout(outputs, keep_prob=1 - self.parameters["dropout"][1 if layer + 1 <
-                                                                                                   num_layers else 2])
-
-            # Transpose outputs into batch_dim x time_dim x output_dim
-            outputs = tf.transpose(outputs, [1, 0, 2])
-        else:
-            # Dropout
-            if "dropout" in self.parameters:
-                lstm_layers = tf.contrib.rnn.MultiRNNCell(
-                    [tf.contrib.rnn.DropoutWrapper(
-                        tf.contrib.rnn.BasicLSTMCell(self.parameters["hidden_dim"]) if mode == "basic"
-                        else tf.contrib.rnn.LSTMBlockCell(self.parameters["hidden_dim"], forget_bias=0.0),
-                        output_keep_prob=1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2])
-                        for layer in range(num_layers)])
-            else:
-                # Layers of lstm cells
-                lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(self.parameters["hidden_dim"])
-                                                           if mode == "basic" else
-                                                           tf.contrib.rnn.LSTMBlockCell(self.parameters["hidden_dim"])
-                                                           for _ in range(num_layers)])
-
-            # Initial state
-            initial_state = lstm_layers.zero_state(self.parameters["batch_dim"], tf.float32)
-            self.placeholders["initial_state"] = initial_state
-
-            # Outputs and states of lstm layers
-            outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, initial_state)
-
-        # Add time ahead before final dense layer
-        hidden_dim = self.parameters["hidden_dim"]
-        if "time_ahead_downstream" in self.parameters:
-            if self.parameters["time_ahead_downstream"]:
-                outputs = tf.concat([outputs, tf.expand_dims(time_ahead, 2)], 2)
-                hidden_dim = self.parameters["hidden_dim"] + 1
-
-        # Final dense layer weights
-        output_weights = tf.get_variable("output_weights", [hidden_dim, self.parameters["output_dim"]])
-
-        # Final dense layer bias
-        output_bias = tf.get_variable("output_bias", [self.parameters["output_dim"]])
-
-        # Dense layer (careful: bias or cudnn would corrupt padding. Hence mask needed)
-        outputs = tf.einsum('aij,jk->aik', outputs, output_weights) + output_bias
-
-        # Components
-        self.components = {"outputs": outputs, "final_state": final_states}
-
-        # Brain
-        self.brain = self.components["outputs"]
-
-
-class PD_LSTM_Memory_Model(Brains):
-    def build(self):
-        # Graph placeholders
-        inputs = tf.placeholder("float", [None, None, self.parameters["input_dim"]])
-        time_dims = tf.placeholder(tf.int32, [None]) if "max_time_dim" in self.parameters else None
-        time_ahead = tf.placeholder("float", [None, None])
-        self.placeholders = {"inputs": inputs, "time_dims": time_dims, "time_ahead": time_ahead}
-
-        # Mask for canceling out padding in dynamic sequences
-        self.components = {"mask": tf.expand_dims(tf.sign(tf.reduce_max(tf.abs(self.placeholders["inputs"]), axis=2)),
-                                                  axis=2)}
-
-        # Parameters
-        self.parameters.update({"output_dim": self.parameters["midstream_dim"]})
-
-        # Default cell mode ("basic", "block", "cudnn") and number of layers
-        num_layers = self.parameters["num_layers"] if "num_layers" in self.parameters else 1
-
-        # Dropout
-        if "dropout" in self.parameters:
-            inputs = tf.nn.dropout(inputs, keep_prob=1 - self.parameters["dropout"][0])
-
-        # Add time ahead before lstm layer
-        if "time_ahead_upstream" in self.parameters:
-            if self.parameters["time_ahead_upstream"]:
-                inputs = tf.concat([inputs, tf.expand_dims(time_ahead, 2)], 2)
-
-        with tf.variable_scope('lstm1'):
-            # Dropout
-            lstm_layers = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.DropoutWrapper(
-                tf.contrib.rnn.LSTMBlockCell(self.parameters["midstream_dim"], forget_bias=5), output_keep_prob=
-                1 - self.parameters["dropout"][1 if layer + 1 < num_layers else 2]) for layer in range(num_layers)])
-
-            # Outputs and states of lstm layers
-            outputs, final_states = tf.nn.dynamic_rnn(lstm_layers, inputs, time_dims, dtype=tf.float32)
-
-        # Add time ahead before lstm layer
-        if "time_ahead_midstream" in self.parameters:
-            if self.parameters["time_ahead_midstream"]:
-                outputs = tf.concat([outputs, tf.expand_dims(time_ahead, 2)], 2)
-                self.parameters.update({"output_dim": self.parameters["midstream_dim"] + 1})
-
-        # Give mask the right dimensionality
-        mask = tf.tile(self.components["mask"], [1, 1, self.parameters["output_dim"]])
-
-        # Mask for canceling out padding in dynamic sequences
-        outputs *= mask
-
-        # Components
-        self.components.update({"vision": outputs, "final_state": final_states})
-
-        # Brain
-        self.brain = self.components["vision"]
+def optional_name_scope(scope):
+    return Scope() if scope is None else tf.name_scope(scope)
