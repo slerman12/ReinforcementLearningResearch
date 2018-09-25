@@ -32,9 +32,7 @@ class Vision:
         self.session = self.name_scope = self.loss = self.train = self.accuracy = None
 
     def start_brain(self, name_scope="vision"):
-        if self.tensorflow:
-            with tf.name_scope(name_scope):
-                self.brain.build()
+        self.brain.build(name_scope=name_scope, update_stream=True)
 
     def see(self, state, do_partial_run=False):
         # Set state TODO better to give option to preprocess all data at once if available
@@ -65,9 +63,9 @@ class Vision:
         if self.train is not None:
             self.brain.run(placeholders, self.train)
 
-    def adapt(self, parameters=None, placeholders=None, components=None, session=None):
+    def adapt(self, parameters=None, session=None):
         # Adapted brain
-        adapted_brain = self.brain.adapt(parameters, placeholders, components, session)
+        adapted_brain = self.brain.adapt(parameters=parameters, session=session)
 
         # Adapted vision
         return self.__class__(self.size, self.greyscale, self.crop, self.params, adapted_brain, self.tensorflow)

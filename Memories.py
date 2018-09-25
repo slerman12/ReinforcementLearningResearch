@@ -142,7 +142,8 @@ class Traces:
 
 
 class Memories:
-    def __init__(self, capacity, attributes, target_attribute="target", num_similar_memories=32, tensorflow=True):
+    def __init__(self, capacity, attributes, target_attribute="target", num_similar_memories=32, brain=None,
+                 tensorflow=True):
         # Initialize memories
         self.memories = {}
 
@@ -183,103 +184,10 @@ class Memories:
         self.num_duplicates = 0
 
         # Brain
-        self.brain = None
+        self.brain = brain
 
         # If using TensorFlow
         self.tensorflow = tensorflow
-
-    def start_brain(self, projection, name_scope="memory"):
-        if self.tensorflow:
-            with tf.name_scope(name_scope):
-                # Parameters, placeholders, and components
-                parameters = {}
-                placeholders = {}
-                components = {}
-
-                # TODO allow projection to be None and pass in raw parameters (either here or through brains)
-
-                # Parameters
-                parameters.update({"input_dim": projection.parameters["output_dim"],
-                                   "representation_dim": self.attributes["representation"],
-                                   "output_dim": self.attributes[self.target_attribute]})
-
-                # Placeholders
-                placeholders.update(projection.placeholders)
-
-                # Components
-                components.update({"inputs": projection.brain})
-                if projection.components is not None:
-                    if "mask" in projection.components:
-                        components.update({"mask": projection.components["mask"]})
-
-                # Embedding weights and bias
-                embedding_weights = tf.get_variable("memory_embedding_weights",
-                                                    [parameters["input_dim"], parameters["representation_dim"]])
-                embedding_bias = tf.get_variable("memory_embedding_bias", [parameters["representation_dim"]])
-
-                # Embedding for memory TODO account for 1-dim
-                representation = tf.einsum("aj,jk->ak" if len(projection.brain.shape) == 2 else "aij,jk->aik",
-                                           projection.brain, embedding_weights) + embedding_bias
-
-                # Standardize to batch x time x dim even if no time provided
-                if len(projection.brain.shape) == 2:
-                    representation = tf.expand_dims(representation, axis=1)
-
-                # If mask needed
-                if "mask" in components:
-                    # Mask for canceling out padding in dynamic sequences
-                    representation *= tf.tile(components["mask"], [1, 1, parameters["representation_dim"]])
-
-                # Components
-                components.update({"representation": representation})
-
-                # Retrieved memories
-                remembered_representations = tf.placeholder("float", [None, None, self.num_similar_memories,
-                                                                      self.attributes["representation"]])
-                remembered_attributes = tf.placeholder("float", [None, None, self.num_similar_memories,
-                                                                 parameters["output_dim"]])
-
-                # Placeholders
-                placeholders.update({"remembered_representations": remembered_representations,
-                                     "remembered_attributes": remembered_attributes})
-
-                # To prevent division by 0 and to prevent NaN gradients from square root of 0
-                distance_delta = 0.001
-
-                # Distances (batch x time x k)
-                distances = tf.sqrt(tf.reduce_sum(tf.squared_difference(
-                    tf.tile(tf.expand_dims(representation, 2), [1, 1, self.num_similar_memories, 1]),
-                    remembered_representations), 3) + distance_delta ** 2)
-                # distances = tf.reduce_sum(tf.squared_difference(
-                #     tf.tile(tf.expand_dims(representation, 2), [1, 1, self.num_similar_memories, 1]),
-                #     remembered_representations), 3)
-
-                # Weights (batch x time x k x attributes)
-                weights = tf.tile(tf.expand_dims(1.0 / distances, axis=3), [1, 1, 1, parameters["output_dim"]])
-                # weights = tf.tile(tf.expand_dims(1.0 / (distances + distance_delta), axis=3),
-                #                   [1, 1, 1, self.attributes["attributes"]])
-
-                # Division numerator and denominator (for weighted means)
-                numerator = tf.reduce_sum(weights * remembered_attributes, axis=2)  # Weigh attributes
-                denominator = tf.reduce_sum(weights, axis=2)  # Normalize weightings
-
-                # In case denominator is zero
-                safe_denominator = tf.where(tf.less(denominator, 1e-7), tf.ones_like(denominator), denominator)
-
-                # Distance weighted memory attributes (batch x time x attributes)
-                outputs = tf.divide(numerator, safe_denominator)
-
-                # If mask needed
-                if "mask" in components:
-                    # Apply mask to outputs
-                    outputs *= tf.tile(components["mask"], [1, 1, parameters["output_dim"]])
-
-                # Components
-                components.update({"outputs": outputs, "expectation": outputs})
-
-                # Brain
-                self.brain = Brains.Brains(brain=outputs, parameters=parameters, placeholders=placeholders,
-                                           components=components)
 
     def store(self, memory, check_duplicate=False):
         # If memory capacity has not been reached
@@ -441,15 +349,15 @@ class Memories:
         # Modified
         self.modified = True
 
-    def adapt(self, capacity=None, attributes=None, num_similar_memories=None, tensorflow=None):
+    def adapt(self, capacity=None, attributes=None, num_similar_memories=None, tensorflow=None, brain=None):
         # Bodies
-        bodies = []
+        bodies = [self.brain]
 
         # Genes
         genes = [self.capacity, self.attributes, self.num_similar_memories, self.tensorflow]
 
         # Mutations
-        body_mutations = []
+        body_mutations = [brain]
         gene_mutations = [capacity, attributes, num_similar_memories, tensorflow]
 
         # Default bodies
@@ -464,7 +372,8 @@ class Memories:
 
         # Return adapted agent
         return self.__class__(capacity=gene_mutations[0], attributes=gene_mutations[1],
-                              num_similar_memories=gene_mutations[2], tensorflow=gene_mutations[3])
+                              num_similar_memories=gene_mutations[2], tensorflow=gene_mutations[3],
+                              brain=body_mutations[0])
 
 
 class MFEC(Memories):

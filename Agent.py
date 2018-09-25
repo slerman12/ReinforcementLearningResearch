@@ -6,7 +6,7 @@ import Brains
 
 
 class Agent:
-    def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, attributes=None,
+    def __init__(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, brain_parameters=None,
                  exploration_rate=None, actions=None, tensorflow=True, scope_name="training", session=None):
         # Start timing (wall time)
         start_time = time.time()
@@ -27,6 +27,9 @@ class Agent:
         # Parameters
         self.actions = actions
         self.exploration_rate = exploration_rate
+
+        # Brain parameters
+        self.brain_parameters = brain_parameters
 
         # Brain defaults TODO change errors to metrics
         self.brain = self.loss = self.errors = self.train = self.accuracy = \
@@ -53,7 +56,7 @@ class Agent:
 
     def start_brain(self):
         # Default empty brain
-        self.brain = Brains.Brains(tensorflow=self.tensorflow, session=self.session)
+        pass
 
     def stop_brain(self):
         # Start timing
@@ -267,38 +270,48 @@ class Agent:
         # Move perception of time forward
         self.perception_of_time += time_quantum
 
-    def adapt(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, actions=None,
-              exploration_rate=None, tensorflow=None, scope_name="adapted", session=None):
+    def adapt(self, vision=None, long_term_memory=None, short_term_memory=None, traces=None, brain_parameters=None,
+              actions=None, exploration_rate=None, tensorflow=None, scope_name="adapted", session=None):
         # Bodies
         bodies = [self.vision, self.long_term_memory, self.short_term_memory, self.traces]
 
         # Genes
-        genes = [self.actions, self.exploration_rate, self.tensorflow, self.session]
+        genes = [self.brain_parameters, self.actions, self.exploration_rate, self.tensorflow, self.session]
 
         # Mutations
         body_mutations = [vision, long_term_memory, short_term_memory, traces]
-        gene_mutations = [actions, exploration_rate, tensorflow, session]
+        gene_mutations = [brain_parameters, actions, exploration_rate, tensorflow, session]
 
         # Default bodies
         for i, mutation in enumerate(body_mutations):
-            if mutation is None and bodies[i] is not None:
-                body_mutations[i] = bodies[i].adapt()
+            if bodies[i] is not None:
+                if mutation is None:
+                    body_mutations[i] = bodies[i].adapt()
+                elif isinstance(mutation, dict):
+                    body_mutations[i] = bodies[i].adapt(body_mutations[i])
 
         # Default genes
         for i, mutation in enumerate(gene_mutations):
             if mutation is None:
                 gene_mutations[i] = genes[i]
+            elif isinstance(mutation, dict):
+                gene_mutations[i] = genes[i]
+                gene_mutations[i].update(mutation)
 
         # Return adapted agent
         return self.__class__(vision=body_mutations[0], long_term_memory=body_mutations[1],
-                              short_term_memory=body_mutations[2], traces=body_mutations[3], actions=gene_mutations[0],
-                              exploration_rate=gene_mutations[1], tensorflow=gene_mutations[2],
-                              scope_name=scope_name, session=gene_mutations[3])
+                              short_term_memory=body_mutations[2], traces=body_mutations[3],
+                              brain_parameters=gene_mutations[0], actions=gene_mutations[1],
+                              exploration_rate=gene_mutations[2], tensorflow=gene_mutations[3],
+                              scope_name=scope_name, session=gene_mutations[4])
 
     def start_tensorflow(self):
         # Open scope, start brains (build graphs), and begin session
         with tf.name_scope(self.scope_name):
             with tf.variable_scope("brain", reuse=None or self.scope_name != "training", initializer=None):
+                # Initialize agent's brain
+                self.brain = Brains.Brains()
+
                 # Start brain
                 self.start_brain()
 
@@ -382,20 +395,22 @@ class Agent:
         # Map strings in fetches to components
         for i, key in enumerate(fetches):
             if isinstance(key, str):
-                fetches[i] = self.brain.components[key]
+                fetches[i] = self.brain.projections[key]
 
         # Check if fetches None
         fetches = [fetch for fetch in fetches if fetch is not None]
 
         # Default feeds
         if feeds is None:
-            feeds = self.brain.placeholders
+            feeds = {projection: self.brain.projections[projection] for projection in self.brain.projections
+                     if isinstance(self.brain.projections[projection], tf.Tensor) and
+                     self.brain.projections[projection].op.type == 'Placeholder'}
         elif isinstance(feeds, list):
             # Map strings in fetches to components
             new_feeds = {}
             for key in feeds:
                 if isinstance(key, str):
-                    new_feeds[key] = self.brain.placeholders[key]
+                    new_feeds[key] = self.brain.projections[key]
             feeds = new_feeds
 
         # Default no partial run setup
@@ -420,6 +435,8 @@ class Agent:
 
     def save(self, filename="Saved/brain"):
         if self.tensorflow:
+            # if not os.path.exists(save_dir):
+            #     os.makedirs(save_dir)
             # Save to file
             self.tensorflow_saver.save(self.session, filename)
 
@@ -825,6 +842,78 @@ class Regressor(Agent):
 
         # Return session
         return self.session
+
+
+class NewMemory(Agent):
+    def start_brain(self):
+        # Start vision
+        self.brain.add_to_stream(self.vision.brain, name_scope="vision", start=True)
+
+        # Start long term memory
+        self.brain.add_to_stream(self.long_term_memory.brain, "mask", name_scope="memory", start=True)
+
+        '''Loss, Metrics, and Training'''
+
+        # Desired outputs and learning rate
+        self.brain.add_to_stream(projections={'desired_outputs': self.brain.stream_projection.shape,
+                                              'learning_rate': []}, start=True)
+
+        # If outputs have dynamic numbers of time dimensions
+        if self.brain.projections["mask"] is not None:
+            # Mask for canceling out padding in dynamic sequences
+            mask = tf.squeeze(self.brain.projections["mask"])
+            mask_normalizer = tf.reduce_sum(mask, 1)
+
+            # Mean squared difference for brain output
+            final_prediction_loss = tf.reduce_mean(tf.squared_difference(self.brain.stream_projection,
+                                                                         self.brain.build("desired_outputs")), 2)
+            final_prediction_loss *= mask
+            final_prediction_loss = tf.reduce_mean(tf.reduce_sum(final_prediction_loss, 1) / mask_normalizer)
+
+            # Mean squared difference for memory module output
+            memory_prediction_loss = tf.reduce_mean(tf.squared_difference(self.brain.build("expectation"),
+                                                                          self.brain.build("desired_outputs")), 2)
+            memory_prediction_loss *= mask
+            memory_prediction_loss = tf.reduce_mean(tf.reduce_sum(memory_prediction_loss, 1) / mask_normalizer)
+
+            # Loss function to optimize
+            self.loss = 0
+            if "final_prediction_loss" in self.brain_parameters:
+                if self.brain_parameters["final_prediction_loss"]:
+                    self.loss += final_prediction_loss
+                    if "final_prediction_loss_weight" in self.brain_parameters:
+                        self.loss *= self.brain_parameters["final_prediction_loss_weight"]
+
+            if "memory_prediction_loss" in self.brain_parameters:
+                if self.brain_parameters["memory_prediction_loss"]:
+                    self.loss += memory_prediction_loss
+
+            # Error(s) to record
+            self.errors = [final_prediction_loss, memory_prediction_loss]
+
+        # If training
+        if self.scope_name == "training":
+            # Training optimization method
+            optimizer = tf.train.AdamOptimizer(self.brain.build("learning_rate"))
+
+            # If gradient clipping
+            if "max_gradient_clip_norm" in self.brain_parameters:
+                # Trainable variables
+                self.variables = tf.trainable_variables()
+
+                # Get gradients of loss and clip them according to max gradient clip norm
+                self.gradients, _ = tf.clip_by_global_norm(tf.gradients(self.loss, self.variables),
+                                                           self.brain_parameters["max_gradient_clip_norm"])
+
+                # Training
+                train = optimizer.apply_gradients(zip(self.gradients, self.variables))
+            else:
+                # Training
+                train = optimizer.minimize(self.loss)
+
+            # Dummy train operation for partial run
+            with tf.control_dependencies([train]):
+                self.train = tf.constant(0)
 
 
 class LifelongMemory(Agent):

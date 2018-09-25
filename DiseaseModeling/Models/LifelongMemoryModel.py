@@ -29,34 +29,35 @@ agent_memories = reader.read(reader.memory_data)
 validation_memories = reader.read(reader.training_memory_data)
 
 # Brain parameters
-brain_parameters = dict(input_dim=reader.input_dim, midstream_dim=128, max_time_dim=reader.max_num_records,
-                        num_layers=1, dropout=[0.2, 0, 0.5, 0.2, 0, 0.65], mode="block", max_gradient_clip_norm=5,
-                        time_ahead_downstream=True, time_ahead_midstream=True, time_ahead_upstream=False,
-                        memory_embedding_dim=64, downstream_weights=False, raw_input_context_vector=False,
+brain_parameters = dict(downstream_weights=False, raw_input_context_vector=False,
                         visual_representation_context_vector=True, dorsal_representation_context_vector=True,
                         num_action_suggestions=1, batch_dim=batch_dim,
                         final_prediction_loss=True, memory_prediction_loss=False, final_prediction_loss_weight=1,
                         memory_closest_prediction_loss=False, context_memory_sum=True)
 
 # Attributes
-attributes = {"representation": brain_parameters["memory_embedding_dim"], "target": reader.desired_output_dim}
+attributes = {"representation": 64, "target": reader.desired_output_dim}
 
 # Vision
-vision = Vision.Vision(brain=Brains.PD_LSTM_Memory_Model(brain_parameters))
+vision = Vision.Vision(brain=Brains.pd_lstm(input_dim=reader.input_dim, output_dim=128, num_layers=1,
+                                            dropout=[0.2, 0, 0.5], time_ahead_downstream=True))
 
-# Agent memory
+# Agent memory (attributes and num sim memories params redundantly set - put brain methods in class's start brain)
 agent_memory = Memories.Memories(capacity=reader.separate_time_dims(agent_memories["inputs"]).shape[0],
-                                 attributes=attributes, num_similar_memories=64)
+                                 attributes=attributes, num_similar_memories=64,
+                                 brain=Brains.pd_lifelong_memory(representation_dim=64, num_similar_memories=64,
+                                                                 output_dim=reader.desired_output_dim,
+                                                                 projection_name="lstm"))
 
 # Validation memory
 validation_memory = agent_memory.adapt(capacity=reader.separate_time_dims(validation_memories["inputs"]).shape[0])
 
 # Agent
-agent = Agent.LifelongMemory(vision=vision, long_term_memory=agent_memory, attributes=attributes)
+agent = Agent.NewMemory(vision=vision, long_term_memory=agent_memory, brain_parameters=brain_parameters)
 
 # Validation
-validate = agent.adapt(vision=agent.vision.adapt({"batch_dim": len(reader.validation_data), "dropout": np.zeros(6)}),
-                       long_term_memory=validation_memory, scope_name="validating")
+validate = agent.adapt(vision={"dropout": np.zeros(6)}, long_term_memory=validation_memory,
+                       brain_parameters={"batch_dim": len(reader.validation_data)}, scope_name="validating")
 
 # Initialize metrics for measuring performance
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
