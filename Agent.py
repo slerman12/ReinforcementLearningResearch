@@ -420,7 +420,7 @@ class Agent:
         # Account for irregularity of TensorBoard logging (still only works if logs are called according to schedule)
         if self.tensorboard_logs is not None:
             def is_tensorboard_logging():
-                learning_steps = self.brain.run(out_projections=[self.learning_steps])
+                learning_steps = self.brain.run(out_projections=self.learning_steps)
                 return learning_steps % self.tensorboard_logging_interval == 0
 
             partial_run["special_fetches"] = [[self.tensorboard_logs], is_tensorboard_logging]
@@ -908,7 +908,7 @@ class NewMemory(Agent):
                 # Training
                 train = optimizer.apply_gradients(zip(self.gradients, self.variables))
             else:
-                # Training
+                # Training TODO set gradients and variables
                 train = optimizer.minimize(self.loss)
 
             # Dummy train operation for partial run

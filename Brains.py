@@ -32,7 +32,6 @@ class Brains:
     def run(self, projections=None, out_projections=None, do_partial_run=False):
         # If TensorFlow
         if self.tensorflow:
-            # TODO: if projection not started, build it
             # Default projections
             if not isinstance(projections, dict):
                 projections = {} if projections is None else {"inputs": projections}
@@ -70,7 +69,7 @@ class Brains:
                         out_projections[i] = self.projections[component]
             else:
                 out_projections = [out_projections]
-            out_projections = [component for component in out_projections if component is not None]
+            out_projections = [projection for projection in out_projections if projection is not None]
 
             # Output single element if components is a single item list
             if isinstance(out_projections, list):
@@ -371,10 +370,10 @@ class Brains:
                             for dependant in dependencies:
                                 # Add projection
                                 if dependant not in copied_to.projections and dependant in copied_from.projections:
-                                    copied_to.projections[dependant] = copied_from.projections[dependant]
+                                    copied_to.projections[dependant] = copy(copied_from.projections[dependant])
                                 # Add stream definition and its dependant projections
                                 if dependant not in copied_to.stream and dependant in copied_from.stream:
-                                    copied_to.stream[dependant] = copied_from.stream[dependant]
+                                    copied_to.stream[dependant] = copy(copied_from.stream[dependant])
                                     copy_over_dependencies(copied_from.stream[dependant]["projections"],
                                                            copied_from, copied_to)
 

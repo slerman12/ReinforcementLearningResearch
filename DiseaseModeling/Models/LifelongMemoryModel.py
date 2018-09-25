@@ -15,11 +15,11 @@ batch_dim = 32
 
 # Model directory
 path = "/Users/sam/Documents/Programming/ReinforcementLearningResearch/DiseaseModeling/Models"
-model_directory = "LifelongMemoryModel/testing3"
+model_directory = "LifelongMemoryModel/NewMemory"
 
 # Data reader ["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"]
 reader = Data.ReadPD("../Data/Processed/encoded.csv", targets=["UPDRS_I", "UPDRS_II", "UPDRS_III", "MSEADLG"],
-                     train_test_split=0.8, train_memory_split=0.15, valid_eval_split=1, sequence_dropout=0)
+                     train_test_split=0.8, train_memory_split=0.5, valid_eval_split=1, sequence_dropout=0)
 
 # Validation data
 validation_data = reader.read(reader.validation_data)
@@ -31,7 +31,7 @@ validation_memories = reader.read(reader.training_memory_data)
 # Brain parameters
 brain_parameters = dict(downstream_weights=False, raw_input_context_vector=False,
                         visual_representation_context_vector=True, dorsal_representation_context_vector=True,
-                        num_action_suggestions=1, batch_dim=batch_dim,
+                        num_action_suggestions=1, batch_dim=batch_dim, max_gradient_clip_norm=5,
                         final_prediction_loss=True, memory_prediction_loss=False, final_prediction_loss_weight=1,
                         memory_closest_prediction_loss=False, context_memory_sum=True)
 
@@ -59,7 +59,7 @@ agent = Agent.NewMemory(vision=vision, long_term_memory=agent_memory, brain_para
 validate = agent.adapt(vision={"dropout": np.zeros(6)}, long_term_memory=validation_memory,
                        brain_parameters={"batch_dim": len(reader.validation_data)}, scope_name="validating")
 
-# Initialize metrics for measuring performance
+# Initialize metrics for measuring performance  TODO: pass agent in for description
 performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Learning Rate",
                                                     "RMSE", "Agent (MSE)", "Validation (MSE)"],
                                       run_throughs_per_epoch=len(reader.training_data) // batch_dim,
@@ -73,7 +73,7 @@ performance = Performance.Performance(metric_names=["Episode", "Learn Time", "Le
 agent.start_tensorboard(scalars={"Agent MSE": agent.loss}, gradients=agent.gradients, variables=agent.variables,
                         logging_interval=10, directory_name="{}/Logs/{}".format(path, model_directory))
 validate.start_tensorboard(scalars={"Validation MSE": validate.loss}, tensorboard_writer=agent.tensorboard_writer,
-                           logging_interval=100, directory_name="{}/Logs/{}".format(path, model_directory))
+                           logging_interval=1, directory_name="{}/Logs/{}".format(path, model_directory))
 
 # TensorFlow Partial Run
 agent.start_tensorflow_partial_run(["representation", agent.errors, agent.train])
@@ -91,7 +91,7 @@ if __name__ == "__main__":
         learning_rate = 0.0001
 
         # Reset memory -- every interval'th epoch
-        if performance.is_epoch(episode, interval=1):
+        if performance.is_epoch(episode, interval=10):
             # Populate memory with representations
             agent_memory.reset(
                 population={"representation": reader.separate_time_dims(validation_memory.represent(agent_memories)),
@@ -141,7 +141,7 @@ if __name__ == "__main__":
                                                             "Validation (MSE)": lambda x: x[-1]})
 
         # Save and re-shuffle -- every interval'th epoch
-        if performance.is_epoch(episode + 1, interval=1):
+        if performance.is_epoch(episode + 1, interval=10):
             # Save agent
             agent.save("{}/Saved/{}".format(path, model_directory))
 
